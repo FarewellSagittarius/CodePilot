@@ -53,3 +53,10 @@ next-env.d.ts
 
 # user uploads (runtime data)
 .codepilot-uploads/
+
+# runtime logs
+/logs/
+
+# local fork icons (not upstream)
+src/app/apple-icon.png
+src/app/icon.png
