@@ -11,17 +11,46 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Warning } from "@/components/ui/icon";
+
 import { useTranslation } from "@/hooks/useTranslation";
 import { InstallWizard } from "@/components/layout/InstallWizard";
+
+interface ClaudeInstallInfo {
+  path: string;
+  version: string | null;
+  type: "native" | "homebrew" | "npm" | "bun" | "unknown";
+}
 
 interface ClaudeStatus {
   connected: boolean;
   version: string | null;
+  binaryPath?: string | null;
+  installType?: string | null;
+  otherInstalls?: ClaudeInstallInfo[];
+  missingGit?: boolean;
 }
 
 const BASE_INTERVAL = 30_000; // 30s
 const BACKED_OFF_INTERVAL = 60_000; // 60s after 3 consecutive stable results
 const STABLE_THRESHOLD = 3;
+
+const INSTALL_TYPE_LABELS: Record<string, string> = {
+  native: "Native",
+  homebrew: "Homebrew",
+  npm: "npm (deprecated)",
+  bun: "bun",
+  unknown: "Unknown",
+};
+
+function getUninstallAdvice(type: string): string | null {
+  switch (type) {
+    case 'npm': return 'npm uninstall -g @anthropic-ai/claude-code';
+    case 'bun': return 'bun remove -g @anthropic-ai/claude-code';
+    case 'homebrew': return 'brew uninstall --cask claude-code';
+    default: return null;
+  }
+}
 
 export function ConnectionStatus() {
   const { t } = useTranslation();
@@ -89,6 +118,15 @@ export function ConnectionStatus() {
     checkStatus();
   }, [checkStatus]);
 
+  // Invalidate server-side caches then refresh — called after install success
+  const handleInstallComplete = useCallback(async () => {
+    try {
+      await fetch('/api/claude-status/invalidate', { method: 'POST' });
+    } catch { /* best-effort */ }
+    stableCountRef.current = 0;
+    checkStatus();
+  }, [checkStatus]);
+
   // Auto-prompt install wizard on first disconnect detection (Electron only)
   useEffect(() => {
     if (
@@ -116,18 +154,24 @@ export function ConnectionStatus() {
   }, []);
 
   const connected = status?.connected ?? false;
+  const hasConflicts = (status?.otherInstalls?.length ?? 0) > 0;
+  const missingGit = status?.missingGit ?? false;
 
   return (
     <>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setDialogOpen(true)}
         className={cn(
-          "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium transition-colors",
+          "h-7 rounded-full px-2.5 text-[11px] font-medium gap-1.5",
           status === null
             ? "bg-muted text-muted-foreground"
             : connected
-              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-              : "bg-red-500/15 text-red-700 dark:text-red-400"
+              ? hasConflicts
+                ? "bg-status-warning-muted text-status-warning-foreground"
+                : "bg-status-success-muted text-status-success-foreground"
+              : "bg-status-error-muted text-status-error-foreground"
         )}
       >
         <span
@@ -136,52 +180,123 @@ export function ConnectionStatus() {
             status === null
               ? "bg-muted-foreground/40"
               : connected
-                ? "bg-emerald-500"
-                : "bg-red-500"
+                ? hasConflicts
+                  ? "bg-status-warning"
+                  : "bg-status-success"
+                : "bg-status-error"
           )}
         />
         {status === null
           ? t('connection.checking')
           : connected
-            ? t('connection.connected')
-            : t('connection.disconnected')}
-      </button>
+            ? hasConflicts
+              ? t('connection.conflict')
+              : t('connection.connected')
+            : missingGit
+              ? t('connection.missingGit')
+              : t('connection.disconnected')}
+      </Button>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {connected ? t('connection.installed') : t('connection.notInstalled')}
+              {connected
+                ? t('connection.installed')
+                : missingGit
+                  ? t('connection.missingGitTitle')
+                  : t('connection.notInstalled')}
             </DialogTitle>
             <DialogDescription>
               {connected
                 ? `Claude Code CLI v${status?.version} is running and ready.`
-                : "Claude Code CLI is required to use this application."}
+                : missingGit
+                  ? t('connection.missingGitDesc')
+                  : "Claude Code CLI is required to use this application."}
             </DialogDescription>
           </DialogHeader>
 
           {connected ? (
             <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-3 rounded-lg bg-emerald-500/10 px-4 py-3">
-                <span className="block h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" />
+              <div className="flex items-center gap-3 rounded-lg bg-status-success-muted px-4 py-3">
+                <span className="block h-2.5 w-2.5 shrink-0 rounded-full bg-status-success" />
                 <div>
-                  <p className="font-medium text-emerald-700 dark:text-emerald-400">Active</p>
-                  <p className="text-xs text-muted-foreground">{t('connection.version', { version: status?.version ?? '' })}</p>
+                  <p className="font-medium text-status-success-foreground">Active</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('connection.version', { version: status?.version ?? '' })}
+                    {status?.installType && ` (${INSTALL_TYPE_LABELS[status.installType] || status.installType})`}
+                  </p>
+                  {status?.binaryPath && (
+                    <p className="text-xs text-muted-foreground font-mono">{status.binaryPath}</p>
+                  )}
                 </div>
+              </div>
+
+              {/* Conflict warning */}
+              {hasConflicts && (
+                <div className="rounded-lg bg-status-warning-muted px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Warning size={16} className="text-status-warning-foreground shrink-0" />
+                    <p className="font-medium text-status-warning-foreground text-xs">
+                      {t('connection.conflictWarning')}
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    {status?.otherInstalls?.map((inst, i) => {
+                      const advice = getUninstallAdvice(inst.type);
+                      return (
+                        <div key={i} className="space-y-0.5">
+                          <p>
+                            <code className="bg-muted px-1 rounded">{inst.path}</code>
+                            {" "}({INSTALL_TYPE_LABELS[inst.type]} {inst.version})
+                          </p>
+                          {advice && (
+                            <p>{t('connection.conflictRemove')}: <code className="bg-muted px-1 rounded">{advice}</code></p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : missingGit ? (
+            <div className="space-y-4 text-sm">
+              <div className="flex items-center gap-3 rounded-lg bg-status-warning-muted px-4 py-3">
+                <Warning size={16} className="text-status-warning-foreground shrink-0" />
+                <div>
+                  <p className="font-medium text-status-warning-foreground">{t('connection.missingGitTitle')}</p>
+                  {status?.version && (
+                    <p className="text-xs text-muted-foreground">Claude Code v{status.version} is installed but cannot run without Git.</p>
+                  )}
+                </div>
+              </div>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <ol className="list-decimal list-inside space-y-0.5">
+                  <li>{t('install.gitStep1')}</li>
+                  <li>{t('install.gitStep2')}</li>
+                  <li>{t('install.gitStep3')}</li>
+                </ol>
               </div>
             </div>
           ) : (
             <div className="space-y-4 text-sm">
-              <div className="flex items-center gap-3 rounded-lg bg-red-500/10 px-4 py-3">
-                <span className="block h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" />
-                <p className="font-medium text-red-700 dark:text-red-400">Not detected</p>
+              <div className="flex items-center gap-3 rounded-lg bg-status-error-muted px-4 py-3">
+                <span className="block h-2.5 w-2.5 shrink-0 rounded-full bg-status-error" />
+                <p className="font-medium text-status-error-foreground">Not detected</p>
               </div>
 
               <div>
                 <h4 className="font-medium mb-1.5">1. {t('connection.installClaude')}</h4>
-                <code className="block rounded-md bg-muted px-3 py-2 text-xs">
-                  npm install -g @anthropic-ai/claude-code
-                </code>
+                {navigator.platform?.startsWith('Win') ? (
+                  <code className="block rounded-md bg-muted px-3 py-2 text-xs">
+                    irm https://claude.ai/install.ps1 | iex
+                  </code>
+                ) : (
+                  <code className="block rounded-md bg-muted px-3 py-2 text-xs">
+                    curl -fsSL https://claude.ai/install.sh | bash
+                  </code>
+                )}
               </div>
 
               <div>
@@ -228,7 +343,7 @@ export function ConnectionStatus() {
       <InstallWizard
         open={wizardOpen}
         onOpenChange={handleWizardOpenChange}
-        onInstallComplete={handleManualRefresh}
+        onInstallComplete={handleInstallComplete}
       />
     </>
   );

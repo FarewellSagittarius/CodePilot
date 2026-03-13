@@ -11,13 +11,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Loading02Icon,
-  CheckmarkCircle02Icon,
-  Alert02Icon,
-} from "@hugeicons/core-free-icons";
+import { SpinnerGap, CheckCircle, Warning } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { SettingsCard } from "@/components/patterns/SettingsCard";
+import { FieldRow } from "@/components/patterns/FieldRow";
+import { StatusBanner } from "@/components/patterns/StatusBanner";
 
 interface DiscordBridgeSettings {
   bridge_discord_bot_token: string;
@@ -164,14 +162,10 @@ export function DiscordBridgeSection() {
   return (
     <div className="max-w-3xl space-y-6">
       {/* Bot Token */}
-      <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
-        <div>
-          <h2 className="text-sm font-medium">{t("discord.credentials")}</h2>
-          <p className="text-xs text-muted-foreground">
-            {t("discord.credentialsDesc")}
-          </p>
-        </div>
-
+      <SettingsCard
+        title={t("discord.credentials")}
+        description={t("discord.credentialsDesc")}
+      >
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">
@@ -198,9 +192,9 @@ export function DiscordBridgeSection() {
             disabled={verifying || !botToken}
           >
             {verifying ? (
-              <HugeiconsIcon
-                icon={Loading02Icon}
-                className="h-3.5 w-3.5 animate-spin mr-1.5"
+              <SpinnerGap
+                size={14}
+                className="animate-spin mr-1.5"
               />
             ) : null}
             {t("discord.verify")}
@@ -208,33 +202,20 @@ export function DiscordBridgeSection() {
         </div>
 
         {verifyResult && (
-          <div
-            className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
-              verifyResult.ok
-                ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                : "bg-red-500/10 text-red-600 dark:text-red-400"
-            }`}
+          <StatusBanner
+            variant={verifyResult.ok ? "success" : "error"}
+            icon={verifyResult.ok ? <CheckCircle size={16} className="shrink-0" /> : <Warning size={16} className="shrink-0" />}
           >
-            <HugeiconsIcon
-              icon={verifyResult.ok ? CheckmarkCircle02Icon : Alert02Icon}
-              className="h-4 w-4 shrink-0"
-            />
             {verifyResult.message}
-          </div>
+          </StatusBanner>
         )}
-      </div>
+      </SettingsCard>
 
       {/* Allowed Users / Channels */}
-      <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
-        <div>
-          <h2 className="text-sm font-medium">
-            {t("discord.allowedUsers")}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {t("discord.allowedUsersDesc")}
-          </p>
-        </div>
-
+      <SettingsCard
+        title={t("discord.allowedUsers")}
+        description={t("discord.allowedUsersDesc")}
+      >
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">
@@ -266,19 +247,13 @@ export function DiscordBridgeSection() {
             </p>
           </div>
         </div>
-      </div>
+      </SettingsCard>
 
       {/* Guild & Group Settings */}
-      <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
-        <div>
-          <h2 className="text-sm font-medium">
-            {t("discord.guildSettings")}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {t("discord.guildSettingsDesc")}
-          </p>
-        </div>
-
+      <SettingsCard
+        title={t("discord.guildSettings")}
+        description={t("discord.guildSettingsDesc")}
+      >
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">
@@ -314,44 +289,35 @@ export function DiscordBridgeSection() {
             </Select>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm">{t("discord.requireMention")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("discord.requireMentionDesc")}
-              </p>
-            </div>
+          <FieldRow
+            label={t("discord.requireMention")}
+            description={t("discord.requireMentionDesc")}
+          >
             <Switch
               checked={requireMention}
               onCheckedChange={setRequireMention}
             />
-          </div>
+          </FieldRow>
 
-          <div className="flex items-center justify-between border-t border-border/30 pt-3">
-            <div>
-              <p className="text-sm">{t("discord.streamPreview")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("discord.streamPreviewDesc")}
-              </p>
-            </div>
+          <FieldRow
+            label={t("discord.streamPreview")}
+            description={t("discord.streamPreviewDesc")}
+            separator
+          >
             <Switch
               checked={streamEnabled}
               onCheckedChange={setStreamEnabled}
             />
-          </div>
+          </FieldRow>
         </div>
 
         <Button size="sm" onClick={handleSaveGroupSettings} disabled={saving}>
           {saving ? t("common.loading") : t("common.save")}
         </Button>
-      </div>
+      </SettingsCard>
 
       {/* Setup Guide */}
-      <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
-        <h2 className="text-sm font-medium">
-          {t("discord.setupGuide")}
-        </h2>
-
+      <SettingsCard title={t("discord.setupGuide")}>
         <div>
           <h3 className="text-xs font-medium mb-1.5">
             {t("discord.setupBotTitle")}
@@ -378,7 +344,7 @@ export function DiscordBridgeSection() {
             <li>{t("discord.stepGuildId")}</li>
           </ol>
         </div>
-      </div>
+      </SettingsCard>
     </div>
   );
 }

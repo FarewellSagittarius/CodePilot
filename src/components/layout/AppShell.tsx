@@ -5,19 +5,21 @@ import { usePathname, useRouter } from "next/navigation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavRail } from "./NavRail";
 import { ChatListPanel } from "./ChatListPanel";
-import { RightPanel } from "./RightPanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { UpdateDialog } from "./UpdateDialog";
 import { UpdateBanner } from "./UpdateBanner";
-import { DocPreview } from "./DocPreview";
-import { PanelContext, type PanelContent, type PreviewViewMode } from "@/hooks/usePanel";
-import { UpdateContext, type UpdateInfo } from "@/hooks/useUpdate";
+import { UnifiedTopBar } from "./UnifiedTopBar";
+import { PanelZone } from "./PanelZone";
+import { PanelContext, type PreviewViewMode } from "@/hooks/usePanel";
+import { UpdateContext } from "@/hooks/useUpdate";
+import { useUpdateChecker } from "@/hooks/useUpdateChecker";
 import { ImageGenContext, useImageGenState } from "@/hooks/useImageGen";
 import { BatchImageGenContext, useBatchImageGenState } from "@/hooks/useBatchImageGen";
 import { SplitContext, type SplitSession } from "@/hooks/useSplit";
 import { SplitChatContainer } from "./SplitChatContainer";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { getActiveSessionIds, getSnapshot } from "@/lib/stream-session-manager";
+import { useGitStatus } from "@/hooks/useGitStatus";
 
 const SPLIT_SESSIONS_KEY = "codepilot:split-sessions";
 const SPLIT_ACTIVE_COLUMN_KEY = "codepilot:split-active-column";
@@ -50,10 +52,6 @@ function loadActiveColumn(): string {
 const EMPTY_SET = new Set<string>();
 const CHATLIST_MIN = 180;
 const CHATLIST_MAX = 400;
-const RIGHTPANEL_MIN = 200;
-const RIGHTPANEL_MAX = 480;
-const DOCPREVIEW_MIN = 320;
-const DOCPREVIEW_MAX = 800;
 
 /** Extensions that default to "rendered" view mode */
 const RENDERED_EXTENSIONS = new Set([".md", ".mdx", ".html", ".htm"]);
@@ -65,24 +63,30 @@ function defaultViewMode(filePath: string): PreviewViewMode {
 }
 
 const LG_BREAKPOINT = 1024;
-const CHECK_INTERVAL = 8 * 60 * 60 * 1000; // 8 hours
-const DISMISSED_VERSION_KEY = "codepilot_dismissed_update_version";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [chatListOpen, setChatListOpenRaw] = useState(false);
+  const [chatListOpenRaw, setChatListOpenRaw] = useState(false);
+
+  // Sync with viewport after hydration to avoid SSR mismatch
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    setChatListOpenRaw(window.matchMedia(`(min-width: ${LG_BREAKPOINT}px)`).matches);
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Panel width state with localStorage persistence
-  const [chatListWidth, setChatListWidth] = useState(() => {
-    if (typeof window === "undefined") return 240;
-    return parseInt(localStorage.getItem("codepilot_chatlist_width") || "240");
-  });
-  const [rightPanelWidth, setRightPanelWidth] = useState(() => {
-    if (typeof window === "undefined") return 288;
-    return parseInt(localStorage.getItem("codepilot_rightpanel_width") || "288");
-  });
+  const [chatListWidth, setChatListWidth] = useState(240);
+
+  // Restore persisted width after hydration
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    const saved = localStorage.getItem("codepilot_chatlist_width");
+    if (saved) setChatListWidth(parseInt(saved));
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleChatListResize = useCallback((delta: number) => {
     setChatListWidth((w) => Math.min(CHATLIST_MAX, Math.max(CHATLIST_MIN, w + delta)));
@@ -94,36 +98,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const handleRightPanelResize = useCallback((delta: number) => {
-    setRightPanelWidth((w) => Math.min(RIGHTPANEL_MAX, Math.max(RIGHTPANEL_MIN, w - delta)));
-  }, []);
-  const handleRightPanelResizeEnd = useCallback(() => {
-    setRightPanelWidth((w) => {
-      localStorage.setItem("codepilot_rightpanel_width", String(w));
-      return w;
-    });
-  }, []);
-
-  // Panel state
+  // Panel state — chatListOpen is derived: raw state gated by route
   const isChatRoute = pathname.startsWith("/chat/") || pathname === "/chat";
+  const chatListOpen = chatListOpenRaw && isChatRoute;
 
-  // Auto-close chat list when leaving chat routes
   const setChatListOpen = useCallback((open: boolean) => {
     setChatListOpenRaw(open);
   }, []);
 
-  useEffect(() => {
-    if (!isChatRoute) {
-      setChatListOpenRaw(false);
-    }
-  }, [isChatRoute]);
-  const [panelOpen, setPanelOpenRaw] = useState(false);
-  const [panelContent, setPanelContent] = useState<PanelContent>("files");
+  // --- New independent panel states ---
+  const [fileTreeOpen, setFileTreeOpen] = useState(false);
+  const [gitPanelOpen, setGitPanelOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+
+  // --- Git summary (derived from polling hook, no setState needed) ---
+  const [currentWorktreeLabel, setCurrentWorktreeLabel] = useState("");
+
   const [workingDirectory, setWorkingDirectory] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [sessionTitle, setSessionTitle] = useState("");
   const [streamingSessionId, setStreamingSessionId] = useState("");
   const [pendingApprovalSessionId, setPendingApprovalSessionId] = useState("");
+
+  const { status: gitStatusFromHook } = useGitStatus(workingDirectory);
+  const currentBranch = gitStatusFromHook?.branch ?? "";
+  const gitDirtyCount = gitStatusFromHook?.changedFiles.filter(f => f.status !== 'untracked').length ?? 0;
 
   // --- Multi-session stream tracking (driven by stream-session-manager) ---
   const [activeStreamingSessions, setActiveStreamingSessions] = useState<Set<string>>(EMPTY_SET);
@@ -178,12 +178,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const addToSplit = useCallback((session: SplitSession) => {
     setSplitSessions((prev) => {
-      // If already in split, don't add again
       if (prev.some((s) => s.sessionId === session.sessionId)) return prev;
 
       if (prev.length < 2) {
-        // First time entering split: add current active session + new session
-        // The current session info comes from PanelContext
         const currentSessionId = sessionId;
         if (currentSessionId && currentSessionId !== session.sessionId) {
           const currentSession: SplitSession = {
@@ -193,7 +190,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             projectName: "",
             mode: "code",
           };
-          // Check if current is already in the list
           const hasCurrentAlready = prev.some((s) => s.sessionId === currentSessionId);
           const next = hasCurrentAlready ? [...prev, session] : [...prev, currentSession, session];
           setActiveColumnIdRaw(session.sessionId);
@@ -201,7 +197,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Append to existing split
       const next = [...prev, session];
       setActiveColumnIdRaw(session.sessionId);
       return next;
@@ -214,13 +209,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setSplitSessions((prev) => {
       const next = prev.filter((s) => s.sessionId !== removeId);
       if (next.length <= 1) {
-        // Exit split mode — defer navigation to useEffect
         if (next.length === 1) {
           pendingNavigateRef.current = next[0].sessionId;
         }
         return [];
       }
-      // If removing active column, switch to first remaining
       setActiveColumnIdRaw((currentActive) =>
         currentActive === removeId ? next[0].sessionId : currentActive
       );
@@ -228,7 +221,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Deferred navigation after split exit (avoids setState-during-render)
   useEffect(() => {
     if (pendingNavigateRef.current) {
       const target = pendingNavigateRef.current;
@@ -250,26 +242,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return splitSessions.some((s) => s.sessionId === sid);
   }, [splitSessions]);
 
-  // Handle delete of a session that's in split
   useEffect(() => {
     const handler = () => {
-      // Re-validate split sessions exist
-      setSplitSessions((prev) => {
-        // We don't remove here; deletion handler in ChatListPanel will call removeFromSplit
-        return prev;
-      });
+      setSplitSessions((prev) => prev);
     };
     window.addEventListener("session-deleted", handler);
     return () => window.removeEventListener("session-deleted", handler);
   }, []);
 
-  // Exit split when navigating to non-chat routes
   useEffect(() => {
     if (isSplitActive && !pathname.startsWith("/chat")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSplitSessions([]);
       setActiveColumnIdRaw("");
     }
-  }, [isSplitActive, pathname]);
+  }, [pathname, isSplitActive]);
 
   const splitContextValue = useMemo(
     () => ({
@@ -299,238 +286,78 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // --- Doc Preview state ---
   const [previewFile, setPreviewFileRaw] = useState<string | null>(null);
   const [previewViewMode, setPreviewViewMode] = useState<PreviewViewMode>("source");
-  const [docPreviewWidth, setDocPreviewWidth] = useState(() => {
-    if (typeof window === "undefined") return 480;
-    return parseInt(localStorage.getItem("codepilot_docpreview_width") || "480");
-  });
 
   const setPreviewFile = useCallback((path: string | null) => {
     setPreviewFileRaw(path);
     if (path) {
       setPreviewViewMode(defaultViewMode(path));
+      setPreviewOpen(true);
+    } else {
+      setPreviewOpen(false);
     }
   }, []);
 
-  const handleDocPreviewResize = useCallback((delta: number) => {
-    setDocPreviewWidth((w) => Math.min(DOCPREVIEW_MAX, Math.max(DOCPREVIEW_MIN, w - delta)));
-  }, []);
-  const handleDocPreviewResizeEnd = useCallback(() => {
-    setDocPreviewWidth((w) => {
-      localStorage.setItem("codepilot_docpreview_width", String(w));
-      return w;
-    });
-  }, []);
-
-  // Auto-open panel on chat detail routes, close on others
-  // Also close doc preview when navigating away or switching sessions
+  // Reset doc preview and panels when navigating between pages/sessions
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setPanelOpenRaw(isChatDetailRoute);
     setPreviewFileRaw(null);
-  }, [isChatDetailRoute, pathname]);
+    setPreviewOpen(false);
+  }, [pathname]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  const setPanelOpen = useCallback((open: boolean) => {
-    setPanelOpenRaw(open);
-  }, []);
-
-  // Keep chat list state in sync when resizing across the breakpoint (only on chat routes)
+  // Keep chat list state in sync when resizing across the breakpoint
   useEffect(() => {
-    if (!isChatRoute) return;
     const mql = window.matchMedia(`(min-width: ${LG_BREAKPOINT}px)`);
     const handler = (e: MediaQueryListEvent) => setChatListOpenRaw(e.matches);
     mql.addEventListener("change", handler);
-    setChatListOpenRaw(mql.matches);
     return () => mql.removeEventListener("change", handler);
-  }, [isChatRoute]);
+  }, []);
+
 
   // --- Skip-permissions indicator ---
   const [skipPermissionsActive, setSkipPermissionsActive] = useState(false);
 
-  const fetchSkipPermissions = useCallback(async () => {
-    try {
-      const res = await fetch("/api/settings/app");
-      if (res.ok) {
-        const data = await res.json();
-        setSkipPermissionsActive(data.settings?.dangerously_skip_permissions === "true");
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // Re-fetch when window gains focus / becomes visible instead of polling every 5s
   useEffect(() => {
-    fetchSkipPermissions();
+    let cancelled = false;
+    const doFetch = async () => {
+      try {
+        const res = await fetch("/api/settings/app");
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setSkipPermissionsActive(data.settings?.dangerously_skip_permissions === "true");
+        }
+      } catch { /* ignore */ }
+    };
+    doFetch();
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        fetchSkipPermissions();
-      }
+      if (document.visibilityState === "visible") doFetch();
     };
     document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("focus", fetchSkipPermissions);
+    window.addEventListener("focus", doFetch);
     return () => {
+      cancelled = true;
       document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("focus", fetchSkipPermissions);
+      window.removeEventListener("focus", doFetch);
     };
-  }, [fetchSkipPermissions]);
-
-  // --- Update check state ---
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [showDialog, setShowDialog] = useState(false);
-
-  // Runtime detection: native updater available when running in Electron with updater bridge
-  const isNativeUpdater = typeof window !== "undefined" && !!window.electronAPI?.updater;
-
-  // --- Native updater status listener ---
-  useEffect(() => {
-    if (!isNativeUpdater) return;
-    const cleanup = window.electronAPI!.updater!.onStatus((event) => {
-      switch (event.status) {
-        case 'available':
-          setUpdateInfo((prev) => ({
-            updateAvailable: true,
-            latestVersion: event.info?.version ?? prev?.latestVersion ?? '',
-            currentVersion: prev?.currentVersion ?? '',
-            releaseName: event.info?.releaseName ?? prev?.releaseName ?? '',
-            releaseNotes: typeof event.info?.releaseNotes === 'string' ? event.info.releaseNotes : prev?.releaseNotes ?? '',
-            releaseUrl: prev?.releaseUrl ?? '',
-            publishedAt: event.info?.releaseDate ?? prev?.publishedAt ?? '',
-            downloadProgress: null,
-            readyToInstall: false,
-            isNativeUpdate: true,
-            lastError: null,
-          }));
-          {
-            const ver = event.info?.version;
-            const dismissed = localStorage.getItem(DISMISSED_VERSION_KEY);
-            if (ver && dismissed !== ver) {
-              setShowDialog(true);
-            }
-          }
-          break;
-        case 'not-available':
-          setUpdateInfo((prev) => prev ? { ...prev, updateAvailable: false, isNativeUpdate: true, lastError: null } : prev);
-          break;
-        case 'downloading':
-          setUpdateInfo((prev) => prev ? {
-            ...prev,
-            downloadProgress: event.progress?.percent ?? prev.downloadProgress,
-            isNativeUpdate: true,
-            lastError: null,
-          } : prev);
-          break;
-        case 'downloaded':
-          setUpdateInfo((prev) => prev ? {
-            ...prev,
-            readyToInstall: true,
-            downloadProgress: 100,
-            isNativeUpdate: true,
-            lastError: null,
-          } : prev);
-          break;
-        case 'error':
-          setUpdateInfo((prev) => prev ? {
-            ...prev,
-            lastError: event.error ?? 'Unknown error',
-            isNativeUpdate: true,
-          } : prev);
-          break;
-      }
-      if (event.status === 'checking') {
-        setChecking(true);
-      } else {
-        setChecking(false);
-      }
-    });
-    return cleanup;
-  }, [isNativeUpdater]);
-
-  // --- Browser-mode update check (fallback for non-Electron) ---
-  const checkForUpdatesBrowser = useCallback(async () => {
-    setChecking(true);
-    try {
-      const res = await fetch("/api/app/updates");
-      if (!res.ok) return;
-      const data = await res.json();
-      const info: UpdateInfo = {
-        ...data,
-        downloadProgress: null,
-        readyToInstall: false,
-        isNativeUpdate: false,
-        lastError: null,
-      };
-      setUpdateInfo(info);
-
-      if (info.updateAvailable) {
-        const dismissed = localStorage.getItem(DISMISSED_VERSION_KEY);
-        if (dismissed !== info.latestVersion) {
-          setShowDialog(true);
-        }
-      }
-    } catch {
-      // silently ignore network errors
-    } finally {
-      setChecking(false);
-    }
   }, []);
 
-  // --- Unified check: native first, browser fallback ---
-  const checkForUpdates = useCallback(async () => {
-    if (isNativeUpdater) {
-      try {
-        await window.electronAPI!.updater!.checkForUpdates();
-        return;
-      } catch {
-        // native check failed, fall through to browser mode
-      }
-    }
-    await checkForUpdatesBrowser();
-  }, [isNativeUpdater, checkForUpdatesBrowser]);
-
-  // Browser mode: periodic check (non-Electron or as fallback)
-  useEffect(() => {
-    if (isNativeUpdater) return; // native updater handles its own initial check
-    checkForUpdatesBrowser();
-    const id = setInterval(checkForUpdatesBrowser, CHECK_INTERVAL);
-    return () => clearInterval(id);
-  }, [isNativeUpdater, checkForUpdatesBrowser]);
-
-  const dismissUpdate = useCallback(() => {
-    setShowDialog(false);
-  }, []);
-
-  const downloadUpdate = useCallback(async () => {
-    if (isNativeUpdater) {
-      await window.electronAPI!.updater!.downloadUpdate();
-    }
-  }, [isNativeUpdater]);
-
-  const quitAndInstall = useCallback(() => {
-    if (isNativeUpdater) {
-      window.electronAPI!.updater!.quitAndInstall();
-    }
-  }, [isNativeUpdater]);
-
-  const updateContextValue = useMemo(
-    () => ({
-      updateInfo,
-      checking,
-      checkForUpdates,
-      downloadUpdate,
-      dismissUpdate,
-      showDialog,
-      setShowDialog,
-      quitAndInstall,
-    }),
-    [updateInfo, checking, checkForUpdates, downloadUpdate, dismissUpdate, showDialog, quitAndInstall]
-  );
+  // --- Update checker (native Electron + browser fallback) ---
+  const updateContextValue = useUpdateChecker();
 
   const panelContextValue = useMemo(
     () => ({
-      panelOpen,
-      setPanelOpen,
-      panelContent,
-      setPanelContent,
+      fileTreeOpen,
+      setFileTreeOpen,
+      gitPanelOpen,
+      setGitPanelOpen,
+      previewOpen,
+      setPreviewOpen,
+      terminalOpen,
+      setTerminalOpen,
+      currentBranch,
+      gitDirtyCount,
+      currentWorktreeLabel,
+      setCurrentWorktreeLabel,
       workingDirectory,
       setWorkingDirectory,
       sessionId,
@@ -548,7 +375,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [panelOpen, setPanelOpen, panelContent, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewFile, setPreviewFile, previewViewMode]
+    [fileTreeOpen, gitPanelOpen, previewOpen, terminalOpen, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewFile, setPreviewFile, previewViewMode]
   );
 
   const imageGenValue = useImageGenState();
@@ -565,8 +392,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <NavRail
               chatListOpen={chatListOpen}
               onToggleChatList={() => setChatListOpen(!chatListOpen)}
-              hasUpdate={updateInfo?.updateAvailable ?? false}
-              readyToInstall={updateInfo?.readyToInstall ?? false}
+              hasUpdate={updateContextValue.updateInfo?.updateAvailable ?? false}
+              readyToInstall={updateContextValue.updateInfo?.readyToInstall ?? false}
               skipPermissionsActive={skipPermissionsActive}
             />
             <ErrorBoundary>
@@ -576,42 +403,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <ResizeHandle side="left" onResize={handleChatListResize} onResizeEnd={handleChatListResizeEnd} />
             )}
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-              {/* Electron draggable title bar region — matches side panels' mt-5 */}
-              <div
-                className="h-10 w-full shrink-0"
-                style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-              />
+              <UnifiedTopBar />
               <UpdateBanner />
-              <main className="relative flex-1 overflow-hidden">
-                {isSplitActive ? (
-                  <SplitChatContainer />
-                ) : (
-                  <ErrorBoundary>{children}</ErrorBoundary>
-                )}
-              </main>
+              <div className="flex flex-1 min-h-0 overflow-hidden">
+                <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <main className="relative flex-1 overflow-hidden">
+                    {isSplitActive ? (
+                      <SplitChatContainer />
+                    ) : (
+                      <ErrorBoundary>{children}</ErrorBoundary>
+                    )}
+                  </main>
+                </div>
+                {isChatDetailRoute && <PanelZone />}
+              </div>
             </div>
-            {isChatDetailRoute && previewFile && (
-              <ResizeHandle side="right" onResize={handleDocPreviewResize} onResizeEnd={handleDocPreviewResizeEnd} />
-            )}
-            {isChatDetailRoute && previewFile && (
-              <ErrorBoundary>
-                <DocPreview
-                  filePath={previewFile}
-                  viewMode={previewViewMode}
-                  onViewModeChange={setPreviewViewMode}
-                  onClose={() => setPreviewFile(null)}
-                  width={docPreviewWidth}
-                />
-              </ErrorBoundary>
-            )}
-            {isChatDetailRoute && panelOpen && (
-              <ResizeHandle side="right" onResize={handleRightPanelResize} onResizeEnd={handleRightPanelResizeEnd} />
-            )}
-            {isChatDetailRoute && (
-              <ErrorBoundary>
-                <RightPanel width={rightPanelWidth} />
-              </ErrorBoundary>
-            )}
           </div>
           <UpdateDialog />
         </TooltipProvider>

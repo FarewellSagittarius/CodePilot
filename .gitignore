@@ -60,3 +60,8 @@ next-env.d.ts
 # local fork icons (not upstream)
 src/app/apple-icon.png
 src/app/icon.png
+
+# monorepo: site app build artifacts
+apps/site/.next/
+apps/site/.source/
+apps/site/node_modules/

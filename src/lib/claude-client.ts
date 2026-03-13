@@ -3,6 +3,7 @@ import type {
   SDKAssistantMessage,
   SDKUserMessage,
   SDKResultMessage,
+  SDKResultSuccess,
   SDKPartialAssistantMessage,
   SDKSystemMessage,
   SDKToolProgressMessage,
@@ -16,10 +17,10 @@ import type { ClaudeStreamOptions, SSEEvent, TokenUsage, MCPServerConfig, Permis
 import { isImageFile } from '@/types';
 import { registerPendingPermission } from './permission-registry';
 import { registerConversation, unregisterConversation } from './conversation-registry';
-import { captureCapabilities } from './agent-sdk-capabilities';
+import { captureCapabilities, setCachedPlugins } from './agent-sdk-capabilities';
 import { getSetting, updateSdkSessionId, createPermissionRequest } from './db';
 import { resolveForClaudeCode, toClaudeCodeEnv } from './provider-resolver';
-import { findClaudeBinary, findGitBash, getExpandedPath } from './platform';
+import { findClaudeBinary, findGitBash, getExpandedPath, invalidateClaudePathCache } from './platform';
 import { notifyPermissionRequest, notifyGeneric } from './telegram-bot';
 import os from 'os';
 import fs from 'fs';
@@ -92,6 +93,15 @@ function findClaudePath(): string | undefined {
   const found = findClaudeBinary();
   cachedClaudePath = found ?? null;
   return found;
+}
+
+/**
+ * Invalidate the cached Claude binary path in this module AND in platform.ts.
+ * Must be called after installation so the next SDK call picks up the new binary.
+ */
+export function invalidateClaudeClientCache(): void {
+  cachedClaudePath = undefined; // reset to "not yet looked up"
+  invalidateClaudePathCache();  // also reset the 60s TTL cache in platform.ts
 }
 
 /**
@@ -263,6 +273,101 @@ function buildPromptWithHistory(
   return lines.join('\n');
 }
 
+/**
+ * Lightweight text generation via the Claude Code SDK subprocess.
+ * Uses the same provider/env resolution as streamClaude but without sessions,
+ * MCP, permissions, or conversation history. Suitable for simple tasks like
+ * generating tool descriptions.
+ */
+export async function generateTextViaSdk(params: {
+  providerId?: string;
+  model?: string;
+  system: string;
+  prompt: string;
+  abortSignal?: AbortSignal;
+}): Promise<string> {
+  const resolved = resolveForClaudeCode(undefined, {
+    providerId: params.providerId,
+  });
+
+  const sdkEnv: Record<string, string> = { ...process.env as Record<string, string> };
+  if (!sdkEnv.HOME) sdkEnv.HOME = os.homedir();
+  if (!sdkEnv.USERPROFILE) sdkEnv.USERPROFILE = os.homedir();
+  sdkEnv.PATH = getExpandedPath();
+  delete sdkEnv.CLAUDECODE;
+
+  if (process.platform === 'win32' && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
+    const gitBashPath = findGitBash();
+    if (gitBashPath) sdkEnv.CLAUDE_CODE_GIT_BASH_PATH = gitBashPath;
+  }
+
+  const resolvedEnv = toClaudeCodeEnv(sdkEnv, resolved);
+  Object.assign(sdkEnv, resolvedEnv);
+
+  const abortController = new AbortController();
+  if (params.abortSignal) {
+    params.abortSignal.addEventListener('abort', () => abortController.abort());
+  }
+
+  // Auto-timeout after 60s to prevent indefinite hangs
+  const timeoutId = setTimeout(() => abortController.abort(), 60_000);
+
+  const queryOptions: Options = {
+    cwd: os.homedir(),
+    abortController,
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    env: sanitizeEnv(sdkEnv),
+    settingSources: resolved.settingSources as Options['settingSources'],
+    systemPrompt: params.system,
+    maxTurns: 1,
+  };
+
+  if (params.model) {
+    queryOptions.model = params.model;
+  }
+
+  const claudePath = findClaudePath();
+  if (claudePath) {
+    const ext = path.extname(claudePath).toLowerCase();
+    if (ext === '.cmd' || ext === '.bat') {
+      const scriptPath = resolveScriptFromCmd(claudePath);
+      if (scriptPath) queryOptions.pathToClaudeCodeExecutable = scriptPath;
+    } else {
+      queryOptions.pathToClaudeCodeExecutable = claudePath;
+    }
+  }
+
+  const conversation = query({
+    prompt: params.prompt,
+    options: queryOptions,
+  });
+
+  // Iterate through all messages; the last one with type 'result' has the answer
+  let resultText = '';
+  try {
+    for await (const msg of conversation) {
+      if (msg.type === 'result' && 'result' in msg) {
+        resultText = (msg as SDKResultSuccess).result || '';
+      }
+    }
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (abortController.signal.aborted && !(params.abortSignal?.aborted)) {
+      throw new Error('SDK query timed out after 60s');
+    }
+    throw err;
+  }
+
+  clearTimeout(timeoutId);
+
+  if (!resultText) {
+    throw new Error('SDK query returned no result');
+  }
+
+  return resultText;
+}
+
 export function streamClaude(options: ClaudeStreamOptions): ReadableStream<string> {
   const {
     prompt,
@@ -287,6 +392,7 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
     agent,
     enableFileCheckpointing,
     autoTrigger,
+    context1m,
   } = options;
 
   return new ReadableStream<string>({
@@ -420,6 +526,17 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
         if (enableFileCheckpointing) {
           queryOptions.enableFileCheckpointing = true;
         }
+        if (context1m) {
+          queryOptions.betas = [
+            ...(queryOptions.betas || []),
+            'context-1m-2025-08-07',
+          ];
+        }
+
+        // Plugins: loaded by the SDK itself via enabledPlugins in ~/.claude/settings.json.
+        // CodePilot does NOT explicitly inject plugins — the SDK reads settingSources
+        // ['user', 'project', 'local'] and resolves enabledPlugins on its own,
+        // ensuring parity with Claude CLI.
 
         // Resume session if we have an SDK session ID from a previous conversation turn.
         // Pre-check: verify working_directory exists before attempting resume.
@@ -671,7 +788,6 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           console.warn('[claude-client] Capability capture failed:', err);
         });
 
-        let lastAssistantText = '';
         let tokenUsage: TokenUsage | null = null;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
@@ -685,11 +801,7 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
             case 'assistant': {
               const assistantMsg = message as SDKAssistantMessage;
               // Text deltas are handled by stream_event for real-time streaming.
-              // Only track lastAssistantText here and process tool_use blocks.
-              const text = extractTextFromMessage(assistantMsg);
-              if (text) {
-                lastAssistantText = text;
-              }
+              // Here we only process tool_use blocks.
 
               // Check for tool use blocks
               for (const block of assistantMsg.message.content) {
@@ -798,7 +910,13 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
               const sysMsg = message as SDKSystemMessage;
               if ('subtype' in sysMsg) {
                 if (sysMsg.subtype === 'init') {
-                  const initMsg = sysMsg as SDKSystemMessage & { slash_commands?: unknown; skills?: unknown };
+                  const initMsg = sysMsg as SDKSystemMessage & {
+                    slash_commands?: unknown;
+                    skills?: unknown;
+                    plugins?: Array<{ name: string; path: string }>;
+                    mcp_servers?: unknown;
+                    output_style?: string;
+                  };
                   controller.enqueue(formatSSE({
                     type: 'status',
                     data: JSON.stringify({
@@ -808,8 +926,17 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
                       tools: sysMsg.tools,
                       slash_commands: initMsg.slash_commands,
                       skills: initMsg.skills,
+                      plugins: initMsg.plugins,
+                      mcp_servers: initMsg.mcp_servers,
+                      output_style: initMsg.output_style,
                     }),
                   }));
+
+                  // Cache loaded plugins from init meta for cross-reference in skills route.
+                  // Always set — including empty array — so stale data from a previous
+                  // session that had plugins doesn't leak into a session without plugins.
+                  // capProviderId is defined at line 786 in the same scope.
+                  setCachedPlugins(capProviderId, Array.isArray(initMsg.plugins) ? initMsg.plugins : []);
                 } else if (sysMsg.subtype === 'status') {
                   // SDK sends status messages when permission mode changes (e.g. ExitPlanMode)
                   const statusMsg = sysMsg as SDKSystemMessage & { permissionMode?: string };

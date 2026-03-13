@@ -58,6 +58,58 @@ export interface FilePreview {
 export type SkillKind = 'agent_skill' | 'slash_command' | 'sdk_command' | 'codepilot_command';
 
 // ==========================================
+// Popover / Command Input Types
+// ==========================================
+
+import type { TranslationKey } from '@/i18n';
+import type { ComponentType, SVGAttributes, RefAttributes } from 'react';
+
+/** Generic icon component type — compatible with Phosphor, Lucide, or any SVG icon. */
+export type IconComponent = ComponentType<
+  SVGAttributes<SVGSVGElement> & RefAttributes<SVGSVGElement> & { size?: number | string; className?: string }
+>;
+
+/** Shared model for popover items (slash commands, file mentions, skills). */
+export interface PopoverItem {
+  label: string;
+  value: string;
+  description?: string;
+  descriptionKey?: TranslationKey;
+  builtIn?: boolean;
+  immediate?: boolean;
+  installedSource?: 'agents' | 'claude';
+  source?: 'global' | 'project' | 'plugin' | 'installed' | 'sdk';
+  kind?: SkillKind;
+  icon?: IconComponent;
+}
+
+/** Which popover is currently active in the command input. */
+export type PopoverMode = 'file' | 'skill' | 'cli' | null;
+
+/** Active slash-command badge shown above the textarea. */
+export interface CommandBadge {
+  command: string;
+  label: string;
+  description: string;
+  kind: SkillKind;
+  installedSource?: 'agents' | 'claude';
+}
+
+/** Active CLI tool badge shown above the textarea. */
+export interface CliBadge {
+  id: string;
+  name: string;
+}
+
+/** A detected CLI tool available for use. */
+export interface CliToolItem {
+  id: string;
+  name: string;
+  version: string | null;
+  summary: string;
+}
+
+// ==========================================
 // Task Types
 // ==========================================
 
@@ -128,6 +180,8 @@ export interface ApiProvider {
   env_overrides_json: string;
   /** Semantic model role mapping — JSON string of { default?, reasoning?, small?, haiku?, sonnet?, opus? } */
   role_models_json: string;
+  /** Per-provider options — JSON string of { thinking_mode?, context_1m? } */
+  options_json: string;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -137,6 +191,8 @@ export interface ProviderModelGroup {
   provider_id: string;       // provider DB id, or 'env' for environment variables
   provider_name: string;
   provider_type: string;
+  /** True if this provider only supports Claude Code SDK wire protocol, not standard Messages API */
+  sdkProxyOnly?: boolean;
   models: Array<{
     value: string;           // internal/UI model ID
     label: string;           // display name
@@ -174,6 +230,7 @@ export interface CreateProviderRequest {
   headers_json?: string;
   env_overrides_json?: string;
   role_models_json?: string;
+  options_json?: string;
   notes?: string;
 }
 
@@ -187,8 +244,15 @@ export interface UpdateProviderRequest {
   headers_json?: string;
   env_overrides_json?: string;
   role_models_json?: string;
+  options_json?: string;
   notes?: string;
   sort_order?: number;
+}
+
+/** Per-provider options stored in options_json */
+export interface ProviderOptions {
+  thinking_mode?: 'adaptive' | 'enabled' | 'disabled';
+  context_1m?: boolean;
 }
 
 export interface ProvidersResponse {
@@ -454,6 +518,14 @@ export interface PermissionResponseRequest {
 export interface PluginInfo {
   name: string;
   description: string;
+  author?: { name: string; url?: string };
+  path: string;
+  marketplace: string;
+  location: 'plugins' | 'external_plugins';
+  hasCommands: boolean;
+  hasSkills: boolean;
+  hasAgents: boolean;
+  blocked: boolean;
   enabled: boolean;
 }
 
@@ -500,6 +572,8 @@ export interface AssistantWorkspaceState {
   lastCheckInDate: string | null;
   schemaVersion: number;
   hookTriggeredSessionId?: string;
+  /** ISO timestamp when hookTriggeredSessionId was set — used for staleness detection */
+  hookTriggeredAt?: string;
 }
 
 export interface AssistantWorkspaceFiles {
@@ -882,4 +956,104 @@ export interface ClaudeStreamOptions {
   enableFileCheckpointing?: boolean;
   /** When true, this is an auto-trigger turn (invisible to user) — skip rewind point emission */
   autoTrigger?: boolean;
+  /** Enable 1M context window (beta header: context-1m-2025-08-07) */
+  context1m?: boolean;
+}
+
+// ==========================================
+// CLI Tools Types
+// ==========================================
+
+export type CliToolStatus = 'not_installed' | 'installed' | 'needs_auth' | 'ready';
+export type CliToolCategory = 'media' | 'data' | 'search' | 'download' | 'document' | 'productivity';
+export type InstallMethod = 'brew' | 'npm' | 'pipx' | 'cargo';
+
+export type CliToolPlatform = 'darwin' | 'linux' | 'win32';
+
+export interface CliToolInstallMethod {
+  method: InstallMethod;
+  command: string;
+  platforms: CliToolPlatform[];
+}
+
+export interface CliToolExamplePrompt {
+  label: string;
+  promptZh: string;
+  promptEn: string;
+}
+
+export interface CliToolDefinition {
+  id: string;
+  name: string;
+  binNames: string[];
+  summaryZh: string;
+  summaryEn: string;
+  categories: CliToolCategory[];
+  installMethods: CliToolInstallMethod[];
+  setupType: 'simple' | 'needs_auth';
+  detailIntro: { zh: string; en: string };
+  useCases: { zh: string[]; en: string[] };
+  guideSteps: { zh: string[]; en: string[] };
+  examplePrompts: CliToolExamplePrompt[];
+  homepage?: string;
+  repoUrl?: string;
+  officialDocsUrl?: string;
+  supportsAutoDescribe: boolean;
+}
+
+export interface CliToolRuntimeInfo {
+  id: string;
+  status: CliToolStatus;
+  version: string | null;
+  binPath: string | null;
+  autoDescription?: { zh: string; en: string } | null;
+}
+
+// ==========================================
+// Git Types
+// ==========================================
+
+export interface GitStatus {
+  isRepo: boolean;
+  repoRoot: string;
+  branch: string;
+  upstream: string;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  changedFiles: GitChangedFile[];
+}
+
+export interface GitChangedFile {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked';
+  staged: boolean;
+}
+
+export interface GitBranch {
+  name: string;
+  isRemote: boolean;
+  upstream: string;
+  worktreePath: string;
+}
+
+export interface GitLogEntry {
+  sha: string;
+  authorName: string;
+  authorEmail: string;
+  timestamp: string;
+  message: string;
+}
+
+export interface GitCommitDetail extends GitLogEntry {
+  stats: string;
+  diff: string;
+}
+
+export interface GitWorktree {
+  path: string;
+  head: string;
+  branch: string;
+  bare: boolean;
+  dirty: boolean;
 }

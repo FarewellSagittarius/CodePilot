@@ -38,8 +38,8 @@ export async function POST(request: NextRequest) {
   let activeLockId: string | undefined;
 
   try {
-    const body: SendMessageRequest & { files?: FileAttachment[]; toolTimeout?: number; provider_id?: string; systemPromptAppend?: string; autoTrigger?: boolean; thinking?: unknown; effort?: string; enableFileCheckpointing?: boolean; displayOverride?: string } = await request.json();
-    const { session_id, content, model, mode, files, toolTimeout, provider_id, systemPromptAppend, autoTrigger, thinking, effort, enableFileCheckpointing, displayOverride } = body;
+    const body: SendMessageRequest & { files?: FileAttachment[]; toolTimeout?: number; provider_id?: string; systemPromptAppend?: string; autoTrigger?: boolean; thinking?: unknown; effort?: string; enableFileCheckpointing?: boolean; displayOverride?: string; context_1m?: boolean } = await request.json();
+    const { session_id, content, model, mode, files, toolTimeout, provider_id, systemPromptAppend, autoTrigger, thinking, effort, enableFileCheckpointing, displayOverride, context_1m } = body;
 
     console.log('[chat API] content length:', content.length, 'first 200 chars:', content.slice(0, 200));
     console.log('[chat API] systemPromptAppend:', systemPromptAppend ? `${systemPromptAppend.length} chars` : 'none');
@@ -304,6 +304,17 @@ Start by greeting the user and asking the first question.
       finalSystemPrompt = (finalSystemPrompt || '') + '\n\n' + assistantProjectInstructions;
     }
 
+    // Inject available CLI tools context (best-effort, non-blocking)
+    try {
+      const { buildCliToolsContext } = await import('@/lib/cli-tools-context');
+      const cliToolsCtx = await buildCliToolsContext();
+      if (cliToolsCtx) {
+        finalSystemPrompt = (finalSystemPrompt || '') + '\n\n' + cliToolsCtx;
+      }
+    } catch {
+      // CLI tools context injection failed — don't block chat
+    }
+
     // Load recent conversation history from DB as fallback context.
     // This is used when SDK session resume is unavailable or fails,
     // so the model still has conversation context.
@@ -346,6 +357,7 @@ Start by greeting the user and asking the first question.
       bypassPermissions: session.permission_profile === 'full_access',
       thinking: thinking as ClaudeStreamOptions['thinking'],
       effort: effort as ClaudeStreamOptions['effort'],
+      context1m: context_1m,
       enableFileCheckpointing: enableFileCheckpointing ?? (effectiveMode === 'code'),
       autoTrigger: !!autoTrigger,
       onRuntimeStatusChange: (status: string) => {
@@ -629,15 +641,20 @@ async function processCompletionServerSide(
       console.log('[chat API] Server-side checkin completion succeeded');
     }
 
-    // Clear hookTriggeredSessionId directly (no HTTP needed)
+    // Clear hookTriggeredSessionId directly (no HTTP needed).
+    // CAS: only clear if we are still the owner — prevents wiping another
+    // tab's legitimate lock when completions arrive out of order.
     try {
       const { loadState, saveState } = await import('@/lib/assistant-workspace');
       const { getSetting: getSettingDirect } = await import('@/lib/db');
       const wsPath = getSettingDirect('assistant_workspace_path');
       if (wsPath) {
         const state = loadState(wsPath);
-        state.hookTriggeredSessionId = undefined;
-        saveState(wsPath, state);
+        if (state.hookTriggeredSessionId === sessionId || !state.hookTriggeredSessionId) {
+          state.hookTriggeredSessionId = undefined;
+          state.hookTriggeredAt = undefined;
+          saveState(wsPath, state);
+        }
       }
     } catch {
       // Best effort

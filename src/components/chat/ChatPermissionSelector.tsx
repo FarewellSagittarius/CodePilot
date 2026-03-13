@@ -18,8 +18,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { HugeiconsIcon } from '@hugeicons/react';
-import { LockIcon, SquareUnlock02Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
+import { Button } from '@/components/ui/button';
+import { Lock, LockOpen, CaretDown } from '@/components/ui/icon';
 
 interface ChatPermissionSelectorProps {
   sessionId?: string;
@@ -71,34 +71,33 @@ export function ChatPermissionSelector({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`gap-1 px-2 py-1 text-xs font-medium ${
               isFullAccess
-                ? 'bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20'
+                ? 'bg-status-error-muted text-status-error-foreground hover:bg-status-error-muted'
                 : 'bg-muted text-muted-foreground hover:bg-muted/80'
             }`}
           >
-            <HugeiconsIcon
-              icon={isFullAccess ? SquareUnlock02Icon : LockIcon}
-              className={`h-3.5 w-3.5 ${isFullAccess ? 'text-red-500' : ''}`}
-            />
+            {isFullAccess ? (
+              <LockOpen size={14} className="text-status-error-foreground" />
+            ) : (
+              <Lock size={14} />
+            )}
             <span>
               {isFullAccess ? t('permission.fullAccess') : t('permission.default')}
             </span>
-            <HugeiconsIcon
-              icon={ArrowDown01Icon}
-              className="h-2.5 w-2.5 opacity-60"
-            />
-          </button>
+            <CaretDown size={10} className="opacity-60" />
+          </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-[140px]">
           <DropdownMenuItem onClick={() => handleSelect('default')}>
-            <HugeiconsIcon icon={LockIcon} className="h-3.5 w-3.5" />
+            <Lock size={14} />
             <span>{t('permission.default')}</span>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => handleSelect('full_access')}>
-            <HugeiconsIcon icon={SquareUnlock02Icon} className="h-3.5 w-3.5 text-red-500" />
+            <LockOpen size={14} className="text-status-error-foreground" />
             <span>{t('permission.fullAccess')}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>

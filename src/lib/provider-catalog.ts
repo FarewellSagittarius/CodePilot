@@ -101,6 +101,14 @@ export interface VendorPreset {
   category?: 'chat' | 'media';
   /** Icon key for UI */
   iconKey: string;
+  /**
+   * True for providers that only support the Claude Code SDK wire protocol
+   * (e.g. Kimi /coding/, GLM /api/anthropic).
+   * These providers cannot be used with the Vercel AI SDK text generation path
+   * (streamText / generateText) because they don't implement the standard
+   * Anthropic Messages API.
+   */
+  sdkProxyOnly?: boolean;
 }
 
 // ── Default Anthropic models ────────────────────────────────────
@@ -176,6 +184,7 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     ],
     fields: ['api_key'],
     iconKey: 'zhipu',
+    sdkProxyOnly: true,
   },
 
   // ── Zhipu GLM (Global) ──
@@ -195,6 +204,7 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     ],
     fields: ['api_key'],
     iconKey: 'zhipu',
+    sdkProxyOnly: true,
   },
 
   // ── Kimi ──
@@ -212,6 +222,7 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     ],
     fields: ['api_key'],
     iconKey: 'kimi',
+    sdkProxyOnly: true,
   },
 
   // ── Moonshot ──
@@ -229,6 +240,7 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     ],
     fields: ['api_key'],
     iconKey: 'moonshot',
+    sdkProxyOnly: true,
   },
 
   // ── MiniMax (China) ──
@@ -238,18 +250,23 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     description: 'MiniMax Code Plan — China region',
     descriptionZh: 'MiniMax 编程套餐 — 中国区',
     protocol: 'anthropic',
-    authStyle: 'api_key',
-    baseUrl: 'https://api.minimaxi.com/anthropic',
+    authStyle: 'auth_token',
+    baseUrl: 'https://api.minimaxi.com/anthropic/v1',
     defaultEnvOverrides: {
       API_TIMEOUT_MS: '3000000',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_MODEL: 'MiniMax-M2.5',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M2.5',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M2.5',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M2.5',
     },
     defaultModels: [
       { modelId: 'sonnet', displayName: 'MiniMax-M2.5', role: 'default' },
     ],
     fields: ['api_key'],
     iconKey: 'minimax',
+    sdkProxyOnly: true,
   },
 
   // ── MiniMax (Global) ──
@@ -259,18 +276,23 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     description: 'MiniMax Code Plan — Global region',
     descriptionZh: 'MiniMax 编程套餐 — 国际区',
     protocol: 'anthropic',
-    authStyle: 'api_key',
+    authStyle: 'auth_token',
     baseUrl: 'https://api.minimax.io/anthropic',
     defaultEnvOverrides: {
       API_TIMEOUT_MS: '3000000',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_MODEL: 'MiniMax-M2.5',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M2.5',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M2.5',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M2.5',
     },
     defaultModels: [
       { modelId: 'sonnet', displayName: 'MiniMax-M2.5', role: 'default' },
     ],
     fields: ['api_key'],
     iconKey: 'minimax',
+    sdkProxyOnly: true,
   },
 
   // ── Volcengine Ark ──
@@ -286,6 +308,7 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     defaultModels: [],  // User must specify model_names
     fields: ['api_key', 'model_names'],
     iconKey: 'volcengine',
+    sdkProxyOnly: true,
   },
 
   // ── Aliyun Bailian ──
@@ -309,6 +332,7 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     ],
     fields: ['api_key'],
     iconKey: 'bailian',
+    sdkProxyOnly: true,
   },
 
   // ── AWS Bedrock ──
@@ -479,6 +503,18 @@ export function findPresetForLegacy(baseUrl: string, providerType: string): Vend
   if (baseUrl) {
     const match = VENDOR_PRESETS.find(p => p.baseUrl === baseUrl);
     if (match) return match;
+
+    // Fuzzy match: legacy entries may have old URLs (e.g. minimaxi.com/anthropic
+    // before /v1 suffix was added). Match by domain substring against presets.
+    const urlLower = baseUrl.toLowerCase();
+    const fuzzy = VENDOR_PRESETS.find(p => {
+      if (!p.baseUrl) return false;
+      try {
+        const presetHost = new URL(p.baseUrl).hostname;
+        return urlLower.includes(presetHost);
+      } catch { return false; }
+    });
+    if (fuzzy) return fuzzy;
   }
 
   // Type-based fallback
@@ -504,11 +540,13 @@ export function getDefaultModelsForProvider(
 ): CatalogModel[] {
   // Try to find a preset by base_url
   const preset = VENDOR_PRESETS.find(p => p.baseUrl && p.baseUrl === baseUrl);
-  if (preset && preset.defaultModels.length > 0) {
+  if (preset) {
+    // Preset matched — return its models even if empty (e.g. Volcengine
+    // requires users to specify their own model names, so defaultModels is []).
     return preset.defaultModels;
   }
 
-  // Protocol-based defaults
+  // Protocol-based defaults (only when no preset matched)
   if (protocol === 'anthropic' || protocol === 'openrouter' || protocol === 'bedrock' || protocol === 'vertex') {
     return ANTHROPIC_DEFAULT_MODELS;
   }

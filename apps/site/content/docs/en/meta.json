@@ -1,0 +1,20 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "installation",
+    "---Guides---",
+    "chat",
+    "git-and-workspace",
+    "providers",
+    "mcp",
+    "skills",
+    "cli-tools",
+    "bridge",
+    "assistant-workspace",
+    "design-agent",
+    "gallery",
+    "---Help---",
+    "faq"
+  ]
+}

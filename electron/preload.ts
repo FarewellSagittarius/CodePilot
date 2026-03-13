@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   install: {
     checkPrerequisites: () => ipcRenderer.invoke('install:check-prerequisites'),
-    start: (options?: { includeNode?: boolean }) => ipcRenderer.invoke('install:start', options),
+    start: () => ipcRenderer.invoke('install:start'),
     cancel: () => ipcRenderer.invoke('install:cancel'),
     getLogs: () => ipcRenderer.invoke('install:get-logs'),
     onProgress: (callback: (data: unknown) => void) => {
@@ -27,5 +27,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   bridge: {
     isActive: () => ipcRenderer.invoke('bridge:is-active'),
+  },
+  terminal: {
+    create: (opts: { id: string; cwd: string; cols: number; rows: number }) =>
+      ipcRenderer.invoke('terminal:create', opts),
+    write: (id: string, data: string) =>
+      ipcRenderer.send('terminal:write', { id, data }),
+    resize: (id: string, cols: number, rows: number) =>
+      ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
+    kill: (id: string) =>
+      ipcRenderer.invoke('terminal:kill', id),
+    onData: (callback: (data: { id: string; data: string }) => void) => {
+      const listener = (_event: unknown, data: { id: string; data: string }) => callback(data);
+      ipcRenderer.on('terminal:data', listener);
+      return () => { ipcRenderer.removeListener('terminal:data', listener); };
+    },
+    onExit: (callback: (data: { id: string; code: number }) => void) => {
+      const listener = (_event: unknown, data: { id: string; code: number }) => callback(data);
+      ipcRenderer.on('terminal:exit', listener);
+      return () => { ipcRenderer.removeListener('terminal:exit', listener); };
+    },
   },
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -13,24 +13,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Loading02Icon, CheckmarkCircle02Icon, Alert02Icon, TelegramIcon, BubbleChatIcon, GameController01Icon, MessageMultiple02Icon } from "@hugeicons/core-free-icons";
+import { SpinnerGap, CheckCircle, Warning, TelegramLogo, ChatTeardrop, GameController, ChatsCircle } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useBridgeStatus } from "@/hooks/useBridgeStatus";
+import { SettingsCard } from "@/components/patterns/SettingsCard";
+import { FieldRow } from "@/components/patterns/FieldRow";
+import { StatusBanner } from "@/components/patterns/StatusBanner";
 import type { ProviderModelGroup } from "@/types";
-
-interface AdapterStatus {
-  channelType: string;
-  running: boolean;
-  connectedAt: string | null;
-  lastMessageAt: string | null;
-  error: string | null;
-}
-
-interface BridgeStatus {
-  running: boolean;
-  startedAt: string | null;
-  adapters: AdapterStatus[];
-}
 
 interface BridgeSettings {
   remote_bridge_enabled: string;
@@ -58,14 +47,11 @@ const DEFAULT_SETTINGS: BridgeSettings = {
 
 export function BridgeSection() {
   const [settings, setSettings] = useState<BridgeSettings>(DEFAULT_SETTINGS);
-  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
   const [saving, setSaving] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [workDir, setWorkDir] = useState("");
   const [model, setModel] = useState("");
   const [providerGroups, setProviderGroups] = useState<ProviderModelGroup[]>([]);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { bridgeStatus, starting, stopping, startBridge, stopBridge } = useBridgeStatus();
   const { t } = useTranslation();
 
   const fetchSettings = useCallback(async () => {
@@ -90,18 +76,6 @@ export function BridgeSection() {
     }
   }, []);
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await fetch("/api/bridge");
-      if (res.ok) {
-        const data = await res.json();
-        setBridgeStatus(data);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const fetchModels = useCallback(async () => {
     try {
       const res = await fetch("/api/providers/models");
@@ -118,24 +92,8 @@ export function BridgeSection() {
 
   useEffect(() => {
     fetchSettings();
-    fetchStatus();
     fetchModels();
-  }, [fetchSettings, fetchStatus, fetchModels]);
-
-  // Poll bridge status while bridge is running
-  useEffect(() => {
-    if (bridgeStatus?.running) {
-      pollRef.current = setInterval(fetchStatus, 5000);
-    } else if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-      }
-    };
-  }, [bridgeStatus?.running, fetchStatus]);
+  }, [fetchSettings, fetchModels]);
 
   const saveSettings = async (updates: Partial<BridgeSettings>) => {
     setSaving(true);
@@ -206,38 +164,6 @@ export function BridgeSection() {
     }
   };
 
-  const handleStartBridge = async () => {
-    setStarting(true);
-    try {
-      await fetch("/api/bridge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start" }),
-      });
-      await fetchStatus();
-    } catch {
-      // ignore
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const handleStopBridge = async () => {
-    setStopping(true);
-    try {
-      await fetch("/api/bridge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "stop" }),
-      });
-      await fetchStatus();
-    } catch {
-      // ignore
-    } finally {
-      setStopping(false);
-    }
-  };
-
   const handleToggleAutoStart = (checked: boolean) => {
     saveSettings({ bridge_auto_start: checked ? "true" : "" });
   };
@@ -254,37 +180,28 @@ export function BridgeSection() {
   return (
     <div className="max-w-3xl space-y-6">
       {/* Enable/Disable Master Toggle */}
-      <div
-        className={`rounded-lg border p-4 transition-shadow hover:shadow-sm ${
-          isEnabled
-            ? "border-primary/50 bg-primary/5"
-            : "border-border/50"
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-medium">{t("bridge.title")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("bridge.description")}
-            </p>
-          </div>
+      <SettingsCard className={isEnabled ? "border-primary/50 bg-primary/5" : undefined}>
+        <FieldRow
+          label={t("bridge.title")}
+          description={t("bridge.description")}
+        >
           <Switch
             checked={isEnabled}
             onCheckedChange={handleToggleEnabled}
             disabled={saving}
           />
-        </div>
+        </FieldRow>
         {isEnabled && (
-          <div className="mt-3 flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-xs text-primary">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />
+          <StatusBanner variant="info" className="bg-primary/10 text-primary">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-primary inline-block mr-1" />
             {t("bridge.activeHint")}
-          </div>
+          </StatusBanner>
         )}
-      </div>
+      </SettingsCard>
 
       {/* Bridge Status + Start/Stop */}
       {isEnabled && (
-        <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
+        <SettingsCard>
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-sm font-medium">{t("bridge.status")}</h2>
@@ -298,14 +215,11 @@ export function BridgeSection() {
               <div
                 className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-xs ${
                   isRunning
-                    ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                    ? "bg-status-success-muted text-status-success-foreground"
                     : "bg-muted text-muted-foreground"
                 }`}
               >
-                <HugeiconsIcon
-                  icon={isRunning ? CheckmarkCircle02Icon : Alert02Icon}
-                  className="h-3.5 w-3.5 shrink-0"
-                />
+                {isRunning ? <CheckCircle size={14} className="shrink-0" /> : <Warning size={14} className="shrink-0" />}
                 {isRunning
                   ? t("bridge.statusConnected")
                   : t("bridge.statusDisconnected")}
@@ -314,13 +228,13 @@ export function BridgeSection() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={handleStopBridge}
+                  onClick={stopBridge}
                   disabled={stopping}
                 >
                   {stopping ? (
-                    <HugeiconsIcon
-                      icon={Loading02Icon}
-                      className="h-3.5 w-3.5 animate-spin mr-1.5"
+                    <SpinnerGap
+                      size={14}
+                      className="animate-spin mr-1.5"
                     />
                   ) : null}
                   {stopping ? t("bridge.stopping") : t("bridge.stop")}
@@ -328,13 +242,13 @@ export function BridgeSection() {
               ) : (
                 <Button
                   size="sm"
-                  onClick={handleStartBridge}
+                  onClick={startBridge}
                   disabled={starting}
                 >
                   {starting ? (
-                    <HugeiconsIcon
-                      icon={Loading02Icon}
-                      className="h-3.5 w-3.5 animate-spin mr-1.5"
+                    <SpinnerGap
+                      size={14}
+                      className="animate-spin mr-1.5"
                     />
                   ) : null}
                   {starting ? t("bridge.starting") : t("bridge.start")}
@@ -342,31 +256,22 @@ export function BridgeSection() {
               )}
             </div>
           </div>
-        </div>
+        </SettingsCard>
       )}
 
       {/* Channel Toggles */}
       {isEnabled && (
-        <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
-          <div>
-            <h2 className="text-sm font-medium">{t("bridge.channels")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("bridge.channelsDesc")}
-            </p>
-          </div>
-
+        <SettingsCard
+          title={t("bridge.channels")}
+          description={t("bridge.channelsDesc")}
+        >
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <HugeiconsIcon
-                  icon={TelegramIcon}
-                  className="h-4 w-4 text-muted-foreground"
-                />
+                <TelegramLogo size={16} className="text-muted-foreground" />
                 <div>
                   <p className="text-sm">{t("bridge.telegramChannel")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("bridge.telegramChannelDesc")}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("bridge.telegramChannelDesc")}</p>
                 </div>
               </div>
               <Switch
@@ -378,15 +283,10 @@ export function BridgeSection() {
 
             <div className="flex items-center justify-between border-t border-border/30 pt-3">
               <div className="flex items-center gap-3">
-                <HugeiconsIcon
-                  icon={BubbleChatIcon}
-                  className="h-4 w-4 text-muted-foreground"
-                />
+                <ChatTeardrop size={16} className="text-muted-foreground" />
                 <div>
                   <p className="text-sm">{t("bridge.feishuChannel")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("bridge.feishuChannelDesc")}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("bridge.feishuChannelDesc")}</p>
                 </div>
               </div>
               <Switch
@@ -398,15 +298,10 @@ export function BridgeSection() {
 
             <div className="flex items-center justify-between border-t border-border/30 pt-3">
               <div className="flex items-center gap-3">
-                <HugeiconsIcon
-                  icon={GameController01Icon}
-                  className="h-4 w-4 text-muted-foreground"
-                />
+                <GameController size={16} className="text-muted-foreground" />
                 <div>
                   <p className="text-sm">{t("bridge.discordChannel")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("bridge.discordChannelDesc")}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("bridge.discordChannelDesc")}</p>
                 </div>
               </div>
               <Switch
@@ -418,15 +313,10 @@ export function BridgeSection() {
 
             <div className="flex items-center justify-between border-t border-border/30 pt-3">
               <div className="flex items-center gap-3">
-                <HugeiconsIcon
-                  icon={MessageMultiple02Icon}
-                  className="h-4 w-4 text-muted-foreground"
-                />
+                <ChatsCircle size={16} className="text-muted-foreground" />
                 <div>
                   <p className="text-sm">{t("bridge.qqChannel")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("bridge.qqChannelDesc")}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("bridge.qqChannelDesc")}</p>
                 </div>
               </div>
               <Switch
@@ -436,33 +326,27 @@ export function BridgeSection() {
               />
             </div>
 
-            <div className="flex items-center justify-between border-t border-border/30 pt-3">
-              <div>
-                <p className="text-sm">{t("bridge.autoStart")}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t("bridge.autoStartDesc")}
-                </p>
-              </div>
+            <FieldRow
+              label={t("bridge.autoStart")}
+              description={t("bridge.autoStartDesc")}
+              separator
+            >
               <Switch
                 checked={isAutoStart}
                 onCheckedChange={handleToggleAutoStart}
                 disabled={saving}
               />
-            </div>
+            </FieldRow>
           </div>
-        </div>
+        </SettingsCard>
       )}
 
       {/* Adapter Status */}
       {isEnabled && isRunning && adapterCount > 0 && (
-        <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
-          <div>
-            <h2 className="text-sm font-medium">{t("bridge.adapters")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("bridge.adaptersDesc")}
-            </p>
-          </div>
-
+        <SettingsCard
+          title={t("bridge.adapters")}
+          description={t("bridge.adaptersDesc")}
+        >
           <div className="space-y-2">
             {bridgeStatus?.adapters.map((adapter) => (
               <div
@@ -476,7 +360,7 @@ export function BridgeSection() {
                   <div
                     className={`rounded px-2 py-0.5 text-xs ${
                       adapter.running
-                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                        ? "bg-status-success-muted text-status-success-foreground"
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
@@ -491,26 +375,22 @@ export function BridgeSection() {
                   </p>
                 )}
                 {adapter.error && (
-                  <p className="text-xs text-red-500">
+                  <p className="text-xs text-status-error-foreground">
                     {t("bridge.adapterLastError")}: {adapter.error}
                   </p>
                 )}
               </div>
             ))}
           </div>
-        </div>
+        </SettingsCard>
       )}
 
       {/* Default Settings */}
       {isEnabled && (
-        <div className="rounded-lg border border-border/50 p-4 space-y-4 transition-shadow hover:shadow-sm">
-          <div>
-            <h2 className="text-sm font-medium">{t("bridge.defaults")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("bridge.defaultsDesc")}
-            </p>
-          </div>
-
+        <SettingsCard
+          title={t("bridge.defaults")}
+          description={t("bridge.defaultsDesc")}
+        >
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">
@@ -583,7 +463,7 @@ export function BridgeSection() {
           >
             {saving ? t("common.loading") : t("common.save")}
           </Button>
-        </div>
+        </SettingsCard>
       )}
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
+import { Lightning } from '@/components/ui/icon';
 import {
   Tooltip,
   TooltipContent,
@@ -20,7 +21,7 @@ export function SlashCommandButton({ onInsertSlash }: SlashCommandButtonProps) {
     <Tooltip>
       <TooltipTrigger asChild>
         <PromptInputButton onClick={onInsertSlash}>
-          <span className="text-sm font-medium leading-none">/</span>
+          <Lightning size={16} />
         </PromptInputButton>
       </TooltipTrigger>
       <TooltipContent>

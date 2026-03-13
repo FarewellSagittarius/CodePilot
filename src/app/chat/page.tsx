@@ -24,38 +24,44 @@ interface ToolResultInfo {
 
 export default function NewChatPage() {
   const router = useRouter();
-  const { setWorkingDirectory, setPanelOpen, setPendingApprovalSessionId } = usePanel();
+  const { setPendingApprovalSessionId } = usePanel();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [toolUses, setToolUses] = useState<ToolUseInfo[]>([]);
   const [toolResults, setToolResults] = useState<ToolResultInfo[]>([]);
   const [statusText, setStatusText] = useState<string | undefined>();
-  const [workingDir, setWorkingDir] = useState('');
-  const [mode, setMode] = useState('code');
+  const [workingDir] = useState('');
+  const [mode] = useState('code');
   const [currentModel, setCurrentModel] = useState('sonnet');
   const [currentProviderId, setCurrentProviderId] = useState('');
   const [pendingPermission, setPendingPermission] = useState<PermissionRequestEvent | null>(null);
   const [permissionResolved, setPermissionResolved] = useState<'allow' | 'deny' | null>(null);
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
   const [permissionProfile, setPermissionProfile] = useState<'default' | 'full_access'>('default');
+  const [createdSessionId, setCreatedSessionId] = useState<string | undefined>();
   const abortControllerRef = useRef<AbortController | null>(null);
   // Effort level — lifted here so the first message includes it
   const [selectedEffort, setSelectedEffort] = useState<string | undefined>(undefined);
-  // Thinking mode from app settings
+  // Provider options (thinking mode + 1M context)
   const [thinkingMode, setThinkingMode] = useState<string>('adaptive');
+  const [context1m, setContext1m] = useState(false);
 
-  // Fetch thinking mode from app settings
+  // Fetch provider-specific options (with abort to prevent stale responses on fast switch)
   useEffect(() => {
-    fetch('/api/settings/app')
+    const pid = currentProviderId || 'env';
+    const controller = new AbortController();
+    fetch(`/api/providers/options?providerId=${encodeURIComponent(pid)}`, { signal: controller.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.settings?.thinking_mode) {
-          setThinkingMode(data.settings.thinking_mode);
+        if (!controller.signal.aborted) {
+          setThinkingMode(data?.options?.thinking_mode || 'adaptive');
+          setContext1m(!!data?.options?.context_1m);
         }
       })
       .catch(() => {});
-  }, []);
+    return () => controller.abort();
+  }, [currentProviderId]);
 
   const stopStreaming = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -127,12 +133,14 @@ export default function NewChatPage() {
       let sessionId = '';
 
       try {
-        // Create a new session with working directory
+        // Create a new session with working directory + model/provider
         const createBody: Record<string, string> = {
           title: content.slice(0, 50),
           mode,
           working_directory: workingDir.trim(),
           permission_profile: permissionProfile,
+          model: currentModel,
+          provider_id: currentProviderId,
         };
 
         const createRes = await fetch('/api/chat/sessions', {
@@ -148,6 +156,7 @@ export default function NewChatPage() {
 
         const { session }: SessionResponse = await createRes.json();
         sessionId = session.id;
+        setCreatedSessionId(sessionId);
 
         // Notify ChatListPanel to refresh immediately
         window.dispatchEvent(new CustomEvent('session-created'));
@@ -181,6 +190,7 @@ export default function NewChatPage() {
             ...(systemPromptAppend ? { systemPromptAppend } : {}),
             ...(selectedEffort ? { effort: selectedEffort } : {}),
             ...(thinkingConfig ? { thinking: thinkingConfig } : {}),
+            ...(context1m ? { context_1m: true } : {}),
             ...(displayOverride ? { displayOverride } : {}),
           }),
           signal: controller.signal,
@@ -392,6 +402,7 @@ export default function NewChatPage() {
         messages={messages}
         streamingContent={streamingContent}
         isStreaming={isStreaming}
+        sessionId={createdSessionId}
         toolUses={toolUses}
         toolResults={toolResults}
         streamingToolOutput={streamingToolOutput}
@@ -417,8 +428,6 @@ export default function NewChatPage() {
           setCurrentModel(model);
         }}
         workingDirectory={workingDir}
-        mode={mode}
-        onModeChange={setMode}
         effort={selectedEffort}
         onEffortChange={setSelectedEffort}
       />

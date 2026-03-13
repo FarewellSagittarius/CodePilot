@@ -28,6 +28,7 @@ interface ProviderCapabilityCache {
   commands: SlashCommand[];
   account: AccountInfo | null;
   mcpStatus: McpServerStatus[];
+  loadedPlugins: Array<{ name: string; path: string }>;
   capturedAt: number;
   sessionId: string;
 }
@@ -51,6 +52,7 @@ function getOrCreateCache(providerId: string): ProviderCapabilityCache {
       commands: [],
       account: null,
       mcpStatus: [],
+      loadedPlugins: [],
       capturedAt: 0,
       sessionId: '',
     };
@@ -105,8 +107,11 @@ export async function captureCapabilities(
       conversation.mcpServerStatus(),
     ]);
 
-    cache.models = models.status === 'fulfilled' ? models.value : cache.models;
-    cache.commands = commands.status === 'fulfilled' ? commands.value : cache.commands;
+    // Guard: only overwrite cached models if the new result is non-empty.
+    // An empty array (e.g. transient SDK error) would otherwise wipe valid cached data,
+    // causing models like Opus to disappear from the selector after long idle.
+    cache.models = models.status === 'fulfilled' && models.value.length > 0 ? models.value : cache.models;
+    cache.commands = commands.status === 'fulfilled' && commands.value.length > 0 ? commands.value : cache.commands;
     cache.account = account.status === 'fulfilled' ? account.value : cache.account;
     cache.mcpStatus = mcpStatus.status === 'fulfilled' ? mcpStatus.value : cache.mcpStatus;
     cache.capturedAt = Date.now();
@@ -142,6 +147,15 @@ export function getCachedAccountInfo(providerId: string = 'env'): AccountInfo | 
 
 export function getCachedMcpStatus(providerId: string = 'env'): McpServerStatus[] {
   return getOrCreateCache(providerId).mcpStatus;
+}
+
+export function getCachedPlugins(providerId: string = 'env'): Array<{ name: string; path: string }> {
+  return getOrCreateCache(providerId).loadedPlugins;
+}
+
+export function setCachedPlugins(providerId: string, plugins: Array<{ name: string; path: string }>): void {
+  const cache = getOrCreateCache(providerId);
+  cache.loadedPlugins = plugins;
 }
 
 export function getCapabilityCacheAge(providerId: string = 'env'): number {

@@ -3,14 +3,23 @@
  * Exposed via contextBridge.exposeInMainWorld('electronAPI', ...) in electron/preload.ts.
  */
 
+interface ClaudeInstallDetection {
+  path: string;
+  version: string | null;
+  type: 'native' | 'homebrew' | 'npm' | 'bun' | 'unknown';
+}
+
 interface ElectronInstallAPI {
   checkPrerequisites: () => Promise<{
-    hasNode: boolean;
-    nodeVersion?: string;
     hasClaude: boolean;
     claudeVersion?: string;
+    claudePath?: string;
+    claudeInstallType?: 'native' | 'homebrew' | 'npm' | 'bun' | 'unknown';
+    otherInstalls?: ClaudeInstallDetection[];
+    hasGit?: boolean;
+    platform?: string;
   }>;
-  start: (options?: { includeNode?: boolean }) => Promise<void>;
+  start: () => Promise<void>;
   cancel: () => Promise<void>;
   getLogs: () => Promise<string[]>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,6 +50,15 @@ interface ElectronUpdaterAPI {
   onStatus: (callback: (data: UpdateStatusEvent) => void) => () => void;
 }
 
+interface ElectronTerminalAPI {
+  create: (opts: { id: string; cwd: string; cols: number; rows: number }) => Promise<void>;
+  write: (id: string, data: string) => void;
+  resize: (id: string, cols: number, rows: number) => Promise<void>;
+  kill: (id: string) => Promise<void>;
+  onData: (callback: (data: { id: string; data: string }) => void) => () => void;
+  onExit: (callback: (data: { id: string; code: number }) => void) => () => void;
+}
+
 interface ElectronAPI {
   versions: {
     electron: string;
@@ -58,6 +76,10 @@ interface ElectronAPI {
   };
   install: ElectronInstallAPI;
   updater?: ElectronUpdaterAPI;
+  bridge?: {
+    isActive: () => Promise<boolean>;
+  };
+  terminal?: ElectronTerminalAPI;
 }
 
 declare global {

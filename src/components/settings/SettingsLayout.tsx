@@ -1,15 +1,9 @@
 "use client";
 
 import { useState, useCallback, useSyncExternalStore } from "react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import type { IconSvgElement } from "@hugeicons/react";
-import {
-  Settings02Icon,
-  CodeIcon,
-  AiUserIcon,
-} from "@hugeicons/core-free-icons";
-import { Plug01Icon, Analytics02Icon } from "@hugeicons/core-free-icons";
+import { type Icon, Gear, Code, UserCircle, Plug, ChartBar } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { GeneralSection } from "./GeneralSection";
 import { ProviderManager } from "./ProviderManager";
 import { CliSettingsSection } from "./CliSettingsSection";
@@ -23,15 +17,15 @@ type Section = "general" | "providers" | "cli" | "usage" | "assistant";
 interface SidebarItem {
   id: Section;
   label: string;
-  icon: IconSvgElement;
+  icon: Icon;
 }
 
 const sidebarItems: SidebarItem[] = [
-  { id: "general", label: "General", icon: Settings02Icon },
-  { id: "providers", label: "Providers", icon: Plug01Icon },
-  { id: "cli", label: "Claude CLI", icon: CodeIcon },
-  { id: "usage", label: "Usage", icon: Analytics02Icon },
-  { id: "assistant", label: "Assistant", icon: AiUserIcon },
+  { id: "general", label: "General", icon: Gear },
+  { id: "providers", label: "Providers", icon: Plug },
+  { id: "cli", label: "Claude CLI", icon: Code },
+  { id: "usage", label: "Usage", icon: ChartBar },
+  { id: "assistant", label: "Assistant", icon: UserCircle },
 ];
 
 function getSectionFromHash(): Section {
@@ -87,19 +81,20 @@ export function SettingsLayout() {
         {/* Sidebar */}
         <nav className="flex w-52 shrink-0 flex-col gap-1 border-r border-border/50 p-3">
           {sidebarItems.map((item) => (
-            <button
+            <Button
               key={item.id}
+              variant="ghost"
               onClick={() => handleSectionChange(item.id)}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors text-left",
+                "justify-start gap-3 px-3 py-2 text-sm font-medium text-left w-full",
                 activeSection === item.id
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               )}
             >
-              <HugeiconsIcon icon={item.icon} className="h-4 w-4 shrink-0" />
+              <item.icon size={16} className="shrink-0" />
               {t(settingsLabelKeys[item.label])}
-            </button>
+            </Button>
           ))}
         </nav>
 

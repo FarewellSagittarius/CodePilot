@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Message02Icon,
-  ZapIcon,
-  Plug01Icon,
-  Image01Icon,
-  Settings02Icon,
-  Wifi01Icon,
-} from "@hugeicons/core-free-icons";
+  ChatCircle,
+  Lightning,
+  Plug,
+  Image,
+  Gear,
+  WifiHigh,
+  Terminal,
+} from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -31,11 +31,12 @@ interface NavRailProps {
 }
 
 const navItems = [
-  { href: "/chat", label: "Chats", icon: Message02Icon },
-  { href: "/skills", label: "Skills", icon: ZapIcon },
-  { href: "/mcp", label: "MCP", icon: Plug01Icon },
-  { href: "/gallery", label: "Gallery", icon: Image01Icon },
-  { href: "/bridge", label: "Bridge", icon: Wifi01Icon },
+  { href: "/chat", label: "Chats", icon: ChatCircle },
+  { href: "/skills", label: "Skills", icon: Lightning },
+  { href: "/mcp", label: "MCP", icon: Plug },
+  { href: "/cli-tools", label: "CLI Tools", icon: Terminal },
+  { href: "/gallery", label: "Gallery", icon: Image },
+  { href: "/bridge", label: "Bridge", icon: WifiHigh },
 ] as const;
 
 export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermissionsActive }: NavRailProps) {
@@ -48,12 +49,13 @@ export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermi
     'MCP': 'extensions.mcpServers',
     'Gallery': 'gallery.title',
     'Bridge': 'nav.bridge',
+    'CLI Tools': 'nav.cliTools',
   };
   const isChatRoute = pathname === "/chat" || pathname.startsWith("/chat/");
   const isSettingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
 
   return (
-    <aside className="flex w-14 shrink-0 flex-col items-center bg-sidebar pb-3 pt-10">
+    <aside className="flex w-14 shrink-0 flex-col items-center bg-sidebar/80 backdrop-blur-xl pb-3 pt-10">
       {/* Nav icons */}
       <nav className="flex flex-1 flex-col items-center gap-1">
         {navItems.map((item) => {
@@ -83,7 +85,7 @@ export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermi
                       }
                     }}
                   >
-                    <HugeiconsIcon icon={item.icon} className="h-4 w-4" />
+                    <item.icon size={16} weight={isActive ? "fill" : "regular"} />
                     <span className="sr-only">{t(navLabelKeys[item.label] ?? item.label as TranslationKey)}</span>
                   </Button>
                 ) : (
@@ -98,7 +100,7 @@ export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermi
                       )}
                     >
                       <Link href={item.href}>
-                        <HugeiconsIcon icon={item.icon} className="h-4 w-4" />
+                        <item.icon size={16} weight={isActive ? "fill" : "regular"} />
                         <span className="sr-only">{t(navLabelKeys[item.label] ?? item.label as TranslationKey)}</span>
                       </Link>
                     </Button>
@@ -118,8 +120,8 @@ export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermi
             <TooltipTrigger asChild>
               <div className="flex h-8 w-8 items-center justify-center">
                 <span className="relative flex h-3 w-3">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400 opacity-75" />
-                  <span className="relative inline-flex h-3 w-3 rounded-full bg-orange-500" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-warning opacity-75" />
+                  <span className="relative inline-flex h-3 w-3 rounded-full bg-status-warning" />
                 </span>
               </div>
             </TooltipTrigger>
@@ -139,14 +141,14 @@ export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermi
                 )}
               >
                 <Link href="/settings">
-                  <HugeiconsIcon icon={Settings02Icon} className="h-4 w-4" />
+                  <Gear size={16} weight={isSettingsActive ? "fill" : "regular"} />
                   <span className="sr-only">{t('nav.settings')}</span>
                 </Link>
               </Button>
               {hasUpdate && (
                 <span className={cn(
                   "absolute top-0.5 right-0.5 h-2 w-2 rounded-full",
-                  readyToInstall ? "bg-green-500 animate-pulse" : "bg-primary"
+                  readyToInstall ? "bg-status-success animate-pulse" : "bg-primary"
                 )} />
               )}
             </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { X } from "lucide-react";
+import { X } from "@/components/ui/icon";
 import type { Message, MessagesResponse, ChatSession } from "@/types";
 import { ChatView } from "@/components/chat/ChatView";
 import { Button } from "@/components/ui/button";
@@ -24,15 +24,19 @@ export function SplitColumn({ sessionId, isActive, onClose, onFocus }: SplitColu
   const [sessionTitle, setSessionTitle] = useState("");
   const [sessionModel, setSessionModel] = useState("");
   const [sessionProviderId, setSessionProviderId] = useState("");
+  const [sessionInfoLoaded, setSessionInfoLoaded] = useState(false);
   const [sessionMode, setSessionMode] = useState("");
   const [projectName, setProjectName] = useState("");
   const [sessionWorkingDir, setSessionWorkingDir] = useState("");
-  const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle, setPanelOpen } = usePanel();
+  const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle } = usePanel();
   const { t } = useTranslation();
 
   // Load session metadata
   useEffect(() => {
     let cancelled = false;
+    setSessionInfoLoaded(false);
+    setSessionModel("");
+    setSessionProviderId("");
     async function loadSession() {
       try {
         const res = await fetch(`/api/chat/sessions/${sessionId}`);
@@ -48,6 +52,8 @@ export function SplitColumn({ sessionId, isActive, onClose, onFocus }: SplitColu
         }
       } catch {
         // ignore
+      } finally {
+        if (!cancelled) setSessionInfoLoaded(true);
       }
     }
     loadSession();
@@ -100,18 +106,17 @@ export function SplitColumn({ sessionId, isActive, onClose, onFocus }: SplitColu
       setWorkingDirectory('');
     }
     setSessionId(sessionId);
-    setPanelOpen(true);
     if (sessionTitle) {
       setPanelSessionTitle(sessionTitle);
     }
-  }, [isActive, sessionId, sessionWorkingDir, sessionTitle, setWorkingDirectory, setSessionId, setPanelSessionTitle, setPanelOpen]);
+  }, [isActive, sessionId, sessionWorkingDir, sessionTitle, setWorkingDirectory, setSessionId, setPanelSessionTitle]);
 
   const handleClose = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     onClose();
   }, [onClose]);
 
-  if (loading) {
+  if (loading || !sessionInfoLoaded) {
     return (
       <div
         className={cn(

@@ -20,8 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Loading02Icon, ArrowDown01Icon, ArrowUp01Icon } from "@hugeicons/core-free-icons";
+import { SpinnerGap, CaretDown, CaretUp } from "@/components/ui/icon";
 import type { ApiProvider } from "@/types";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -95,7 +94,8 @@ export function ProviderForm({
       setName(provider.name);
       setProviderType(provider.provider_type);
       setBaseUrl(provider.base_url);
-      setApiKey("");
+      // Show masked key so user sees dots indicating a key exists
+      setApiKey(provider.api_key || "");
       setExtraEnv(provider.extra_env || "{}");
       setHeadersJson(provider.headers_json || "{}");
       setEnvOverridesJson(provider.env_overrides_json || "");
@@ -202,7 +202,7 @@ export function ProviderForm({
     }
   };
 
-  const isMaskedKey = mode === "edit" && provider?.api_key?.startsWith("***");
+  const isMaskedKey = mode === "edit" && apiKey?.startsWith("***");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -278,17 +278,16 @@ export function ProviderForm({
           </div>
 
           {/* Advanced options toggle */}
-          <button
+          <Button
             type="button"
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-xs text-muted-foreground hover:text-foreground px-0 h-auto"
             onClick={() => setShowAdvanced(!showAdvanced)}
           >
-            <HugeiconsIcon
-              icon={showAdvanced ? ArrowUp01Icon : ArrowDown01Icon}
-              className="h-3 w-3"
-            />
+            {showAdvanced ? <CaretUp size={12} /> : <CaretDown size={12} />}
             {t('provider.advancedOptions')}
-          </button>
+          </Button>
 
           {showAdvanced && (
             <div className="space-y-4 border-t border-border/50 pt-4">
@@ -379,7 +378,7 @@ export function ProviderForm({
             </Button>
             <Button type="submit" disabled={saving} className="gap-2">
               {saving && (
-                <HugeiconsIcon icon={Loading02Icon} className="h-4 w-4 animate-spin" />
+                <SpinnerGap size={16} className="animate-spin" />
               )}
               {saving ? t('provider.saving') : mode === "edit" ? t('provider.update') : t('provider.addProvider')}
             </Button>

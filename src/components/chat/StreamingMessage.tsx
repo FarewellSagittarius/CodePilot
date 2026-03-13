@@ -8,6 +8,7 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message';
 import { ToolActionsGroup } from '@/components/ai-elements/tool-actions-group';
+import { Button } from '@/components/ui/button';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { ImageGenConfirmation } from './ImageGenConfirmation';
 import { BatchPlanInlinePreview } from './batch-image-gen/BatchPlanInlinePreview';
@@ -22,7 +23,7 @@ interface ImageGenRequest {
   useLastGenerated?: boolean;
 }
 
-function parseImageGenRequest(text: string): { beforeText: string; request: ImageGenRequest; afterText: string } | null {
+function parseImageGenRequest(text: string): { beforeText: string; request: ImageGenRequest; afterText: string; rawBlock: string } | null {
   const regex = /```image-gen-request\s*\n?([\s\S]*?)\n?\s*```/;
   const match = text.match(regex);
   if (!match) return null;
@@ -51,6 +52,7 @@ function parseImageGenRequest(text: string): { beforeText: string; request: Imag
         useLastGenerated: json.useLastGenerated === true,
       },
       afterText,
+      rawBlock: match[0], // full ```image-gen-request...``` block for exact matching
     };
   } catch {
     return null;
@@ -99,6 +101,7 @@ interface ToolResultInfo {
 interface StreamingMessageProps {
   content: string;
   isStreaming: boolean;
+  sessionId?: string;
   toolUses?: ToolUseInfo[];
   toolResults?: ToolResultInfo[];
   streamingToolOutput?: string;
@@ -140,26 +143,27 @@ function StreamingStatusBar({ statusText, onForceStop }: { statusText?: string; 
   return (
     <div className="flex items-center gap-3 py-2 px-1 text-xs text-muted-foreground">
       <div className="flex items-center gap-2">
-        <span className={isCritical ? 'text-red-500' : isWarning ? 'text-yellow-500' : undefined}>
+        <span className={isCritical ? 'text-status-error-foreground' : isWarning ? 'text-status-warning-foreground' : undefined}>
           <Shimmer duration={1.5}>{displayText}</Shimmer>
         </span>
         {isWarning && !isCritical && (
-          <span className="text-yellow-500 text-[10px]">Running longer than usual</span>
+          <span className="text-status-warning-foreground text-[10px]">Running longer than usual</span>
         )}
         {isCritical && (
-          <span className="text-red-500 text-[10px]">Tool may be stuck</span>
+          <span className="text-status-error-foreground text-[10px]">Tool may be stuck</span>
         )}
       </div>
       <span className="text-muted-foreground/50">|</span>
       <ElapsedTimer />
       {isCritical && onForceStop && (
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="xs"
           onClick={onForceStop}
-          className="ml-auto rounded-md border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500 transition-colors hover:bg-red-500/20"
+          className="ml-auto border-status-error-border bg-status-error-muted text-[10px] font-medium text-status-error-foreground hover:bg-status-error-muted"
         >
           Force stop
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -168,6 +172,7 @@ function StreamingStatusBar({ statusText, onForceStop }: { statusText?: string; 
 export function StreamingMessage({
   content,
   isStreaming,
+  sessionId,
   toolUses = [],
   toolResults = [],
   streamingToolOutput,
@@ -237,6 +242,7 @@ export function StreamingMessage({
           if (parsed) {
             const refs = buildReferenceImages(
               PENDING_KEY,
+              sessionId || '',
               parsed.request.useLastGenerated || false,
               parsed.request.referenceImages,
             );
@@ -244,9 +250,11 @@ export function StreamingMessage({
               <>
                 {parsed.beforeText && <MessageResponse>{parsed.beforeText}</MessageResponse>}
                 <ImageGenConfirmation
+                  sessionId={sessionId}
                   initialPrompt={parsed.request.prompt}
                   initialAspectRatio={parsed.request.aspectRatio}
                   initialResolution={parsed.request.resolution}
+                  rawRequestBlock={parsed.rawBlock}
                   referenceImages={refs.length > 0 ? refs : undefined}
                 />
                 {parsed.afterText && <MessageResponse>{parsed.afterText}</MessageResponse>}

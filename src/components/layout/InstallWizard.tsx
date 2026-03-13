@@ -11,16 +11,16 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Tick01Icon,
-  Cancel01Icon,
-  MinusSignIcon,
-  Loading02Icon,
-  RecordIcon,
-  Copy01Icon,
-  Download04Icon,
-} from "@hugeicons/core-free-icons";
+  Check,
+  X,
+  Minus,
+  SpinnerGap,
+  Circle,
+  Copy,
+  DownloadSimple,
+  Warning,
+} from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface InstallProgress {
@@ -35,6 +35,12 @@ interface InstallProgress {
   logs: string[];
 }
 
+interface ClaudeInstallDetection {
+  path: string;
+  version: string | null;
+  type: "native" | "homebrew" | "npm" | "bun" | "unknown";
+}
+
 interface InstallWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -44,17 +50,19 @@ interface InstallWizardProps {
 type WizardPhase =
   | "checking"
   | "confirm"
+  | "needs-git"
   | "already-installed"
   | "installing"
   | "success"
   | "failed";
 
 interface PrereqResult {
-  hasNode: boolean;
-  nodeVersion?: string;
   hasClaude: boolean;
   claudeVersion?: string;
-  hasHomebrew?: boolean;
+  claudePath?: string;
+  claudeInstallType?: string;
+  otherInstalls?: ClaudeInstallDetection[];
+  hasGit?: boolean;
   platform?: string;
 }
 
@@ -68,15 +76,32 @@ function getInstallAPI() {
 function StepIcon({ status }: { status: string }) {
   switch (status) {
     case "success":
-      return <HugeiconsIcon icon={Tick01Icon} className="size-4 text-emerald-500" />;
+      return <Check size={16} className="text-status-success-foreground" />;
     case "running":
-      return <HugeiconsIcon icon={Loading02Icon} className="size-4 text-primary animate-spin" />;
+      return <SpinnerGap size={16} className="text-primary animate-spin" />;
     case "failed":
-      return <HugeiconsIcon icon={Cancel01Icon} className="size-4 text-red-500" />;
+      return <X size={16} className="text-status-error-foreground" />;
     case "skipped":
-      return <HugeiconsIcon icon={MinusSignIcon} className="size-4 text-muted-foreground" />;
+      return <Minus size={16} className="text-muted-foreground" />;
     default:
-      return <HugeiconsIcon icon={RecordIcon} className="size-3.5 text-muted-foreground/40" />;
+      return <Circle size={14} className="text-muted-foreground/40" />;
+  }
+}
+
+const INSTALL_TYPE_LABELS: Record<string, string> = {
+  native: "Native",
+  homebrew: "Homebrew",
+  npm: "npm (deprecated)",
+  bun: "bun",
+  unknown: "Unknown",
+};
+
+function getUninstallAdvice(type: string): string | null {
+  switch (type) {
+    case 'npm': return 'npm uninstall -g @anthropic-ai/claude-code';
+    case 'bun': return 'bun remove -g @anthropic-ai/claude-code';
+    case 'homebrew': return 'brew uninstall --cask claude-code';
+    default: return null;
   }
 }
 
@@ -90,7 +115,6 @@ export function InstallWizard({
   const [progress, setProgress] = useState<InstallProgress | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
-  const [copiedBrew, setCopiedBrew] = useState(false);
   const [prereqs, setPrereqs] = useState<PrereqResult | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -114,7 +138,7 @@ export function InstallWizard({
     }
   }, []);
 
-  const startInstall = useCallback(async (options?: { includeNode?: boolean }) => {
+  const startInstall = useCallback(async () => {
     const api = getInstallAPI();
     if (!api) return;
 
@@ -134,7 +158,7 @@ export function InstallWizard({
     });
 
     try {
-      await api.start(options);
+      await api.start();
     } catch (err: unknown) {
       setPhase("failed");
       const msg = err instanceof Error ? err.message : String(err);
@@ -155,30 +179,35 @@ export function InstallWizard({
       const result = await api.checkPrerequisites();
       setPrereqs(result);
 
-      if (result.hasClaude) {
+      // Windows requires Git for Windows — check FIRST, even if Claude is already installed,
+      // because Claude Code won't actually work without Git Bash on Windows.
+      if (result.platform === "win32" && result.hasGit === false) {
         setLogs((prev) => [
           ...prev,
-          `Node.js ${result.nodeVersion} found.`,
-          `Claude Code ${result.claudeVersion} already installed.`,
+          ...(result.hasClaude
+            ? [`Claude Code ${result.claudeVersion} found, but Git for Windows is missing.`]
+            : ["Claude Code CLI not detected."]),
+          "Git for Windows is required for Claude Code to work on Windows.",
+        ]);
+        setPhase("needs-git");
+        return;
+      }
+
+      if (result.hasClaude) {
+        const typeLabel = INSTALL_TYPE_LABELS[result.claudeInstallType || "unknown"];
+        setLogs((prev) => [
+          ...prev,
+          `Claude Code ${result.claudeVersion} found (${typeLabel}).`,
+          `Path: ${result.claudePath}`,
         ]);
         setPhase("already-installed");
         return;
       }
 
-      // Don't auto-install — show confirmation first
-      if (result.hasNode) {
-        setLogs((prev) => [
-          ...prev,
-          `Node.js ${result.nodeVersion} found.`,
-          "Claude Code CLI not detected.",
-        ]);
-      } else {
-        setLogs((prev) => [
-          ...prev,
-          "Node.js not found.",
-          "Claude Code CLI not detected.",
-        ]);
-      }
+      setLogs((prev) => [
+        ...prev,
+        "Claude Code CLI not detected.",
+      ]);
       setPhase("confirm");
     } catch (err: unknown) {
       setPhase("failed");
@@ -186,12 +215,6 @@ export function InstallWizard({
       setLogs((prev) => [...prev, `Error checking prerequisites: ${msg}`]);
     }
   }, []);
-
-  // User explicitly clicks "Install" — only then start the actual install
-  const handleConfirmInstall = useCallback(() => {
-    const needsNode = prereqs ? !prereqs.hasNode : false;
-    startInstall({ includeNode: needsNode });
-  }, [prereqs, startInstall]);
 
   const handleCopyLogs = useCallback(async () => {
     try {
@@ -208,26 +231,31 @@ export function InstallWizard({
     onInstallComplete?.();
   }, [onOpenChange, onInstallComplete]);
 
-  // [P1] Close dialog = cancel running install
+  // Close dialog: cancel if installing, invalidate caches if install succeeded
   const handleOpenChange = useCallback(
     async (nextOpen: boolean) => {
-      if (!nextOpen && phase === "installing") {
-        await cancelInstall();
+      if (!nextOpen) {
+        if (phase === "installing") {
+          await cancelInstall();
+        }
+        // If install succeeded, always invalidate caches regardless of how the dialog was closed
+        if (phase === "success") {
+          onInstallComplete?.();
+        }
       }
       onOpenChange(nextOpen);
     },
-    [phase, cancelInstall, onOpenChange]
+    [phase, cancelInstall, onOpenChange, onInstallComplete]
   );
 
   // Auto-check when dialog opens
   useEffect(() => {
     if (open) {
       setPhase("checking"); // eslint-disable-line react-hooks/set-state-in-effect -- reset state before async check
-      setLogs([]);  
-      setProgress(null);  
-      setCopied(false);  
-      setCopiedBrew(false);  
-      setPrereqs(null);  
+      setLogs([]);
+      setProgress(null);
+      setCopied(false);
+      setPrereqs(null);
       checkPrereqs();
     }
     return () => {
@@ -239,6 +267,7 @@ export function InstallWizard({
   }, [open, checkPrereqs]);
 
   const steps = progress?.steps ?? [];
+  const hasConflicts = (prereqs?.otherInstalls?.length ?? 0) > 0;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -247,8 +276,8 @@ export function InstallWizard({
           <DialogTitle>{t('install.title')}</DialogTitle>
           <DialogDescription>
             {phase === "confirm"
-              ? "Claude Code CLI was not detected. Install it now?"
-              : "Automatically install Claude Code CLI"}
+              ? t('install.nativeDescription')
+              : t('install.autoDescription')}
           </DialogDescription>
         </DialogHeader>
 
@@ -266,15 +295,15 @@ export function InstallWizard({
                     className={cn(
                       step.status === "pending" && "text-muted-foreground",
                       step.status === "running" && "text-foreground font-medium",
-                      step.status === "success" && "text-emerald-700 dark:text-emerald-400",
-                      step.status === "failed" && "text-red-700 dark:text-red-400",
+                      step.status === "success" && "text-status-success-foreground",
+                      step.status === "failed" && "text-status-error-foreground",
                       step.status === "skipped" && "text-muted-foreground"
                     )}
                   >
                     {step.label}
                   </span>
                   {step.error && (
-                    <span className="text-xs text-red-500 ml-auto truncate max-w-[200px]">
+                    <span className="text-xs text-status-error-foreground ml-auto truncate max-w-[200px]">
                       {step.error}
                     </span>
                   )}
@@ -286,102 +315,105 @@ export function InstallWizard({
           {/* Phase: checking */}
           {phase === "checking" && steps.length === 0 && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
-              <HugeiconsIcon icon={Loading02Icon} className="size-4 animate-spin" />
+              <SpinnerGap size={16} className="animate-spin" />
               <span>{t('install.checkingPrereqs')}</span>
             </div>
           )}
 
-          {/* Phase: confirm — ask user before installing */}
-          {phase === "confirm" && prereqs && !prereqs.hasNode && !prereqs.hasHomebrew && prereqs.platform === "darwin" && (
+          {/* Phase: needs-git — Windows requires Git for Windows */}
+          {phase === "needs-git" && (
             <div className="space-y-3">
-              <div className="rounded-lg bg-amber-500/10 px-4 py-3 text-sm space-y-1.5">
-                <p className="text-amber-700 dark:text-amber-400 font-medium">
-                  {t('install.homebrewRequired')}
-                </p>
+              <div className="rounded-lg bg-status-warning-muted px-4 py-3 text-sm space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Warning size={16} className="text-status-warning-foreground shrink-0" />
+                  <p className="text-status-warning-foreground font-medium">
+                    {t('install.gitRequired')}
+                  </p>
+                </div>
                 <p className="text-muted-foreground text-xs">
-                  {t('install.homebrewDescription')}
+                  {t('install.gitDescription')}
                 </p>
-              </div>
-              <div className="rounded-md bg-zinc-950 dark:bg-zinc-900 border border-zinc-800 px-3 py-2.5 flex items-center gap-2">
-                <code className="flex-1 text-xs text-zinc-300 break-all select-all">
-                  /bin/bash -c &quot;$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)&quot;
-                </code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0 h-7 px-2"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
-                      setCopiedBrew(true);
-                      setTimeout(() => setCopiedBrew(false), 2000);
-                    } catch { /* clipboard not available */ }
-                  }}
-                >
-                  <HugeiconsIcon icon={Copy01Icon} className="size-3.5" />
-                  <span className="text-xs">{copiedBrew ? t('install.copied') : t('install.copy')}</span>
-                </Button>
               </div>
               <div className="text-sm text-muted-foreground space-y-1">
-                <p>{t('install.homebrewSteps')}</p>
+                <p>{t('install.gitSteps')}</p>
                 <ol className="list-decimal list-inside space-y-0.5 text-xs">
-                  <li>{t('install.homebrewStep1')}</li>
-                  <li>{t('install.homebrewStep2')}</li>
-                  <li>{t('install.homebrewStep3')}</li>
-                  <li>{t('install.homebrewStep4')}</li>
+                  <li>{t('install.gitStep1')}</li>
+                  <li>{t('install.gitStep2')}</li>
+                  <li>{t('install.gitStep3')}</li>
                 </ol>
               </div>
             </div>
           )}
-          {phase === "confirm" && !(prereqs && !prereqs.hasNode && !prereqs.hasHomebrew && prereqs.platform === "darwin") && (
+
+          {/* Phase: confirm — ask user before installing */}
+          {phase === "confirm" && (
             <div className="space-y-3">
-              <div className="rounded-lg bg-amber-500/10 px-4 py-3 text-sm space-y-1.5">
-                {prereqs && !prereqs.hasNode && (
-                  <p className="text-amber-700 dark:text-amber-400">
-                    Node.js — not found (will be installed via {prereqs.platform === "win32" ? "winget" : "Homebrew"})
-                  </p>
-                )}
-                {prereqs?.hasNode && (
-                  <p className="text-emerald-700 dark:text-emerald-400">
-                    Node.js {prereqs.nodeVersion} — found
-                  </p>
-                )}
-                <p className="text-amber-700 dark:text-amber-400">
-                  Claude Code CLI — not found
+              <div className="rounded-lg bg-status-warning-muted px-4 py-3 text-sm space-y-1.5">
+                <p className="text-status-warning-foreground">
+                  Claude Code CLI — {t('install.notDetected')}
                 </p>
               </div>
               <p className="text-sm text-muted-foreground">
-                Click <strong>Install</strong> to automatically set up{" "}
-                {prereqs && !prereqs.hasNode ? "Node.js and " : ""}Claude Code CLI.
+                {t('install.nativeExplain')}
               </p>
             </div>
           )}
 
           {/* Phase: already-installed */}
           {phase === "already-installed" && (
-            <div className="flex items-center gap-3 rounded-lg bg-emerald-500/10 px-4 py-3">
-              <HugeiconsIcon icon={Tick01Icon} className="size-5 text-emerald-500 shrink-0" />
-              <div className="text-sm">
-                <p className="font-medium text-emerald-700 dark:text-emerald-400">
-                  Already installed
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  {t('install.alreadyInstalled')}
-                </p>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 rounded-lg bg-status-success-muted px-4 py-3">
+                <Check size={20} className="text-status-success-foreground shrink-0" />
+                <div className="text-sm">
+                  <p className="font-medium text-status-success-foreground">
+                    {t('install.alreadyInstalled')}
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    {prereqs?.claudeVersion} ({INSTALL_TYPE_LABELS[prereqs?.claudeInstallType || "unknown"]})
+                  </p>
+                </div>
               </div>
+
+              {/* Conflict warning: multiple installations detected */}
+              {hasConflicts && (
+                <div className="rounded-lg bg-status-warning-muted px-4 py-3 text-sm space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Warning size={16} className="text-status-warning-foreground shrink-0" />
+                    <p className="font-medium text-status-warning-foreground">
+                      {t('install.conflictTitle')}
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>{t('install.conflictUsing')}: <code className="bg-muted px-1 rounded">{prereqs?.claudePath}</code></p>
+                    {prereqs?.otherInstalls?.map((inst, i) => {
+                      const advice = getUninstallAdvice(inst.type);
+                      return (
+                        <div key={i} className="space-y-0.5">
+                          <p>
+                            {t('install.conflictAlso')}: <code className="bg-muted px-1 rounded">{inst.path}</code> ({INSTALL_TYPE_LABELS[inst.type]} {inst.version})
+                          </p>
+                          {advice && (
+                            <p>{t('install.conflictRemove')}: <code className="bg-muted px-1 rounded">{advice}</code></p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* Phase: success */}
           {phase === "success" && (
-            <div className="flex items-center gap-3 rounded-lg bg-emerald-500/10 px-4 py-3">
-              <HugeiconsIcon icon={Tick01Icon} className="size-5 text-emerald-500 shrink-0" />
+            <div className="flex items-center gap-3 rounded-lg bg-status-success-muted px-4 py-3">
+              <Check size={20} className="text-status-success-foreground shrink-0" />
               <div className="text-sm">
-                <p className="font-medium text-emerald-700 dark:text-emerald-400">
+                <p className="font-medium text-status-success-foreground">
                   {t('install.complete')}
                 </p>
                 <p className="text-muted-foreground text-xs">
-                  Claude Code CLI has been installed successfully.
+                  {t('install.nativeCompleteDesc')}
                 </p>
               </div>
             </div>
@@ -409,20 +441,22 @@ export function InstallWizard({
               size="sm"
               onClick={handleCopyLogs}
             >
-              <HugeiconsIcon icon={Copy01Icon} />
+              <Copy size={16} />
               {copied ? t('install.copied') : t('install.copyLogs')}
             </Button>
           )}
 
-          {/* Confirm phase: "Recheck" when Homebrew missing on macOS, otherwise "Install" */}
-          {phase === "confirm" && prereqs && !prereqs.hasNode && !prereqs.hasHomebrew && prereqs.platform === "darwin" && (
+          {/* Needs Git: "Recheck" button */}
+          {phase === "needs-git" && (
             <Button size="sm" onClick={checkPrereqs}>
               {t('install.recheck')}
             </Button>
           )}
-          {phase === "confirm" && !(prereqs && !prereqs.hasNode && !prereqs.hasHomebrew && prereqs.platform === "darwin") && (
-            <Button size="sm" onClick={handleConfirmInstall}>
-              <HugeiconsIcon icon={Download04Icon} />
+
+          {/* Confirm phase: "Install" button */}
+          {phase === "confirm" && (
+            <Button size="sm" onClick={startInstall}>
+              <DownloadSimple size={16} />
               {t('install.install')}
             </Button>
           )}
