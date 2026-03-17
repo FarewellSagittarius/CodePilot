@@ -330,6 +330,18 @@ Start by greeting the user and asking the first question.
       // CLI tools context injection failed — don't block chat
     }
 
+    // Inject widget (generative UI) system prompt — gated by user setting (default: enabled)
+    const generativeUISetting = getSetting('generative_ui_enabled');
+    const generativeUIEnabled = generativeUISetting !== 'false';
+    if (generativeUIEnabled) {
+      try {
+        const { WIDGET_SYSTEM_PROMPT } = await import('@/lib/widget-guidelines');
+        finalSystemPrompt = (finalSystemPrompt || '') + '\n\n' + WIDGET_SYSTEM_PROMPT;
+      } catch {
+        // Widget prompt injection failed — don't block chat
+      }
+    }
+
     // Load recent conversation history from DB as fallback context.
     // This is used when SDK session resume is unavailable or fails,
     // so the model still has conversation context.
@@ -373,6 +385,7 @@ Start by greeting the user and asking the first question.
       thinking: thinking as ClaudeStreamOptions['thinking'],
       effort: effort as ClaudeStreamOptions['effort'],
       context1m: context_1m,
+      generativeUI: generativeUIEnabled,
       enableFileCheckpointing: enableFileCheckpointing ?? (effectiveMode === 'code'),
       autoTrigger: !!autoTrigger,
       onRuntimeStatusChange: (status: string) => {

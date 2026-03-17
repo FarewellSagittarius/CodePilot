@@ -48,6 +48,9 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Streaming message ───────────────────────────────────────
   'streaming.thinking': '思考中...',
+  'streaming.thinkingDeep': '深度思考中...',
+  'streaming.preparing': '组织回复中...',
+  'streaming.generating': '生成中',
   'streaming.allowForSession': '本次会话允许',
   'streaming.allowed': '已允许',
   'streaming.denied': '已拒绝',
@@ -79,6 +82,8 @@ const zh: Record<TranslationKey, string> = {
   'settings.autoApproveTrustWarning': '仅在您完全信任当前任务时才启用此选项。此设置适用于所有新的聊天会话。',
   'settings.cancel': '取消',
   'settings.enableAutoApprove': '启用自动批准',
+  'settings.generativeUITitle': '生成式 UI',
+  'settings.generativeUIDesc': '启用聊天中的交互式可视化功能（图表、流程图、原型图等）。关闭后可节省 token，但将无法生成可视化内容。',
   'settings.language': '语言',
   'settings.languageDesc': '选择界面显示语言',
   'settings.usage': '用量统计',
@@ -482,6 +487,21 @@ const zh: Record<TranslationKey, string> = {
   'provider.chatProviders': '聊天服务商',
   'provider.mediaProviders': '媒体服务商',
   'provider.geminiImageDesc': 'Nano Banana Pro — Google Gemini AI 图片生成',
+  'provider.diagnose': '诊断',
+  'provider.doctor.title': '服务商诊断',
+  'provider.doctor.running': '正在运行诊断...',
+  'provider.doctor.rerun': '重新检测',
+  'provider.doctor.exportLogs': '导出日志',
+  'provider.doctor.overall': '总体状态',
+  'provider.doctor.pass': '通过',
+  'provider.doctor.warn': '警告',
+  'provider.doctor.error': '错误',
+  'provider.doctor.probe.cli': 'CLI 健康',
+  'provider.doctor.probe.auth': '鉴权来源',
+  'provider.doctor.probe.provider': '服务商/模型',
+  'provider.doctor.probe.features': '功能兼容性',
+  'provider.doctor.probe.network': '网络/端点',
+  'provider.doctor.fix': '修复',
 
   // ── CLI dynamic field labels ──────────────────────────────
   'cli.loadingSettings': '加载设置中...',
@@ -1099,6 +1119,14 @@ const zh: Record<TranslationKey, string> = {
   'error.retry': '重试',
   'error.selectDirectory': '选择目录',
   'error.openSetup': '打开设置',
+
+  // ── Widget (Generative UI) ────────────────────────────────
+  'widget.loading': '渲染组件中...',
+  'widget.streaming': '正在渲染可视化',
+  'widget.addingInteractivity': '正在为可视化添加交互动画...',
+  'widget.error': '组件渲染错误',
+  'widget.showCode': '显示代码',
+  'widget.hideCode': '隐藏代码',
 };
 
 export default zh;

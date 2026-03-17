@@ -51,6 +51,9 @@ const en = {
 
   // ── Streaming message ───────────────────────────────────────
   'streaming.thinking': 'Thinking...',
+  'streaming.thinkingDeep': 'Thinking deeply...',
+  'streaming.preparing': 'Preparing response...',
+  'streaming.generating': 'Generating',
   'streaming.allowForSession': 'Allow for Session',
   'streaming.allowed': 'Allowed',
   'streaming.denied': 'Denied',
@@ -82,6 +85,8 @@ const en = {
   'settings.autoApproveTrustWarning': 'Only enable this if you fully trust the task at hand. This setting applies to all new chat sessions.',
   'settings.cancel': 'Cancel',
   'settings.enableAutoApprove': 'Enable Auto-approve',
+  'settings.generativeUITitle': 'Generative UI',
+  'settings.generativeUIDesc': 'Enable interactive visualizations (charts, diagrams, mockups) in chat responses. Disabling saves tokens but removes visual generation capability.',
   'settings.language': 'Language',
   'settings.languageDesc': 'Choose the display language for the interface',
   'settings.usage': 'Usage',
@@ -485,6 +490,21 @@ const en = {
   'provider.chatProviders': 'Chat Providers',
   'provider.mediaProviders': 'Media Providers',
   'provider.geminiImageDesc': 'Nano Banana Pro — AI image generation by Google Gemini',
+  'provider.diagnose': 'Diagnose',
+  'provider.doctor.title': 'Provider Doctor',
+  'provider.doctor.running': 'Running diagnostics...',
+  'provider.doctor.rerun': 'Re-run',
+  'provider.doctor.exportLogs': 'Export Logs',
+  'provider.doctor.overall': 'Overall',
+  'provider.doctor.pass': 'PASS',
+  'provider.doctor.warn': 'WARN',
+  'provider.doctor.error': 'ERROR',
+  'provider.doctor.probe.cli': 'CLI Health',
+  'provider.doctor.probe.auth': 'Auth Source',
+  'provider.doctor.probe.provider': 'Provider/Model',
+  'provider.doctor.probe.features': 'Feature Compatibility',
+  'provider.doctor.probe.network': 'Network/Endpoint',
+  'provider.doctor.fix': 'Fix',
 
   // ── CLI dynamic field labels ──────────────────────────────
   'cli.loadingSettings': 'Loading settings...',
@@ -1102,6 +1122,14 @@ const en = {
   'error.retry': 'Retry',
   'error.selectDirectory': 'Select Directory',
   'error.openSetup': 'Open Setup',
+
+  // ── Widget (Generative UI) ────────────────────────────────
+  'widget.loading': 'Rendering widget...',
+  'widget.streaming': 'Rendering visualization',
+  'widget.addingInteractivity': 'Adding interactivity to visualization...',
+  'widget.error': 'Widget render error',
+  'widget.showCode': 'Show code',
+  'widget.hideCode': 'Hide code',
 } as const;
 
 export type TranslationKey = keyof typeof en;
