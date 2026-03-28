@@ -87,10 +87,9 @@ describe('Provider Catalog', () => {
       assert.equal(or.protocol, 'openrouter');
     });
 
-    it('custom-openai preset uses openai-compatible protocol', () => {
+    it('custom-openai preset has been removed', () => {
       const custom = VENDOR_PRESETS.find(p => p.key === 'custom-openai');
-      assert.ok(custom, 'custom-openai preset not found');
-      assert.equal(custom.protocol, 'openai-compatible');
+      assert.equal(custom, undefined, 'custom-openai preset should not exist');
     });
 
     it('anthropic-thirdparty preset uses anthropic protocol and has env_overrides field', () => {
@@ -149,8 +148,8 @@ describe('Provider Catalog', () => {
       assert.equal(inferProtocolFromLegacy('custom', 'https://coding.dashscope.aliyuncs.com/apps/anthropic'), 'anthropic');
     });
 
-    it('custom type + unknown URL → openai-compatible protocol', () => {
-      assert.equal(inferProtocolFromLegacy('custom', 'https://my-server.example.com/v1'), 'openai-compatible');
+    it('custom type + unknown URL → anthropic protocol', () => {
+      assert.equal(inferProtocolFromLegacy('custom', 'https://my-server.example.com/v1'), 'anthropic');
     });
 
     it('custom type + URL containing /anthropic → anthropic protocol', () => {
@@ -647,9 +646,9 @@ describe('Entry Point Consistency', () => {
     }
   });
 
-  it('legacy custom type with non-anthropic URL infers openai-compatible', () => {
+  it('legacy custom type with non-anthropic URL infers anthropic', () => {
     const protocol = inferProtocolFromLegacy('custom', 'https://my-ollama.local:11434/v1');
-    assert.equal(protocol, 'openai-compatible');
+    assert.equal(protocol, 'anthropic');
   });
 });
 
@@ -691,26 +690,49 @@ describe('Env Provider AI SDK Consistency', () => {
   });
 
   it('toAiSdkConfig with env resolution produces valid anthropic config', () => {
-    const resolved: ResolvedProvider = {
-      provider: undefined,
-      protocol: 'anthropic',
-      authStyle: 'api_key',
-      model: 'sonnet',
-      upstreamModel: 'sonnet',
-      modelDisplayName: undefined,
-      headers: {},
-      envOverrides: {},
-      roleModels: {},
-      hasCredentials: true,
-      availableModels: [],
-      settingSources: ['user', 'project', 'local'],
+    // Isolate from real env vars AND DB settings that may be set on developer machines
+    const envSnapshot = {
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
     };
-    const config = toAiSdkConfig(resolved);
-    assert.equal(config.sdkType, 'anthropic');
-    assert.equal(config.modelId, 'sonnet');
-    // No apiKey/baseUrl — SDK will read from process.env
-    assert.equal(config.apiKey, undefined);
-    assert.equal(config.baseUrl, undefined);
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.ANTHROPIC_BASE_URL;
+    const dbSnapshot = {
+      anthropic_auth_token: getSetting('anthropic_auth_token'),
+      anthropic_base_url: getSetting('anthropic_base_url'),
+    };
+    setSetting('anthropic_auth_token', '');
+    setSetting('anthropic_base_url', '');
+    try {
+      const resolved: ResolvedProvider = {
+        provider: undefined,
+        protocol: 'anthropic',
+        authStyle: 'api_key',
+        model: 'sonnet',
+        upstreamModel: 'sonnet',
+        modelDisplayName: undefined,
+        headers: {},
+        envOverrides: {},
+        roleModels: {},
+        hasCredentials: true,
+        availableModels: [],
+        settingSources: ['user', 'project', 'local'],
+      };
+      const config = toAiSdkConfig(resolved);
+      assert.equal(config.sdkType, 'anthropic');
+      assert.equal(config.modelId, 'sonnet');
+      // No apiKey/baseUrl — SDK will read from process.env
+      assert.equal(config.apiKey, undefined);
+      assert.equal(config.baseUrl, undefined);
+    } finally {
+      for (const [k, v] of Object.entries(envSnapshot)) {
+        if (v !== undefined) process.env[k] = v; else delete process.env[k];
+      }
+      setSetting('anthropic_auth_token', dbSnapshot.anthropic_auth_token || '');
+      setSetting('anthropic_base_url', dbSnapshot.anthropic_base_url || '');
+    }
   });
 });
 
@@ -728,26 +750,26 @@ describe('Upstream Model ID Mapping', () => {
       protocol: 'anthropic',
       authStyle: 'api_key',
       model: 'sonnet',
-      upstreamModel: 'glm-4.7', // resolved from catalog
-      modelDisplayName: 'GLM-4.7',
+      upstreamModel: 'glm-5-turbo', // resolved from catalog
+      modelDisplayName: 'GLM-5-Turbo',
       headers: {},
       envOverrides: {},
       roleModels: {},
       hasCredentials: true,
       availableModels: [
-        { modelId: 'sonnet', upstreamModelId: 'glm-4.7', displayName: 'GLM-4.7' },
-        { modelId: 'opus', upstreamModelId: 'glm-5', displayName: 'GLM-5' },
+        { modelId: 'sonnet', upstreamModelId: 'glm-5-turbo', displayName: 'GLM-5-Turbo' },
+        { modelId: 'opus', upstreamModelId: 'glm-5.1', displayName: 'GLM-5.1' },
       ],
       settingSources: ['project', 'local'],
     };
 
     // Without override — uses resolved.upstreamModel
     const config1 = toAiSdkConfig(resolved);
-    assert.equal(config1.modelId, 'glm-4.7', 'should use upstream model ID from resolution');
+    assert.equal(config1.modelId, 'glm-5-turbo', 'should use upstream model ID from resolution');
 
     // With override matching an available model — should map to upstream
     const config2 = toAiSdkConfig(resolved, 'opus');
-    assert.equal(config2.modelId, 'glm-5', 'override "opus" should map to upstream "glm-5"');
+    assert.equal(config2.modelId, 'glm-5.1', 'override "opus" should map to upstream "glm-5.1"');
 
     // With override NOT in available models — passes through as-is
     const config3 = toAiSdkConfig(resolved, 'unknown-model');
@@ -760,26 +782,26 @@ describe('Upstream Model ID Mapping', () => {
         id: 'test', name: 'GLM', provider_type: 'custom', protocol: 'anthropic',
         base_url: 'https://open.bigmodel.cn/api/anthropic', api_key: 'key',
         is_active: 1, sort_order: 0, extra_env: '{}', headers_json: '{}',
-        env_overrides_json: '', role_models_json: '{"default":"glm-4.7","sonnet":"glm-4.7","opus":"glm-5"}',
+        env_overrides_json: '', role_models_json: '{"default":"glm-5-turbo","sonnet":"glm-5-turbo","opus":"glm-5.1"}',
         notes: '', created_at: '', updated_at: '', options_json: '{}',
       },
       protocol: 'anthropic',
       authStyle: 'api_key',
       model: 'sonnet',
-      upstreamModel: 'glm-4.7',
-      modelDisplayName: 'GLM-4.7',
+      upstreamModel: 'glm-5-turbo',
+      modelDisplayName: 'GLM-5-Turbo',
       headers: {},
       envOverrides: {},
-      roleModels: { default: 'glm-4.7', sonnet: 'glm-4.7', opus: 'glm-5' },
+      roleModels: { default: 'glm-5-turbo', sonnet: 'glm-5-turbo', opus: 'glm-5.1' },
       hasCredentials: true,
       availableModels: [],
       settingSources: ['project', 'local'],
     };
 
     const env = toClaudeCodeEnv({}, resolved);
-    assert.equal(env.ANTHROPIC_MODEL, 'glm-4.7', 'ANTHROPIC_MODEL should be set from roleModels.default');
-    assert.equal(env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-4.7');
-    assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5');
+    assert.equal(env.ANTHROPIC_MODEL, 'glm-5-turbo', 'ANTHROPIC_MODEL should be set from roleModels.default');
+    assert.equal(env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5-turbo');
+    assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.1');
   });
 });
 
@@ -846,27 +868,50 @@ describe('Entry Point Resolution Contract', () => {
   });
 
   it('toAiSdkConfig for env mode does not require provider record', () => {
-    // env mode: provider=undefined, hasCredentials=true
-    // toAiSdkConfig must produce a valid config that relies on process.env for auth
-    const resolved: ResolvedProvider = {
-      provider: undefined,
-      protocol: 'anthropic',
-      authStyle: 'api_key',
-      model: 'sonnet',
-      upstreamModel: 'sonnet',
-      modelDisplayName: undefined,
-      headers: {},
-      envOverrides: {},
-      roleModels: {},
-      hasCredentials: true,
-      availableModels: [],
-      settingSources: ['user', 'project', 'local'],
+    // Isolate from real env vars AND DB settings
+    const envSnapshot = {
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
     };
-    const config = toAiSdkConfig(resolved);
-    assert.equal(config.sdkType, 'anthropic');
-    assert.equal(config.apiKey, undefined, 'env mode should not inject apiKey — SDK reads from process.env');
-    assert.equal(config.baseUrl, undefined, 'env mode should not inject baseUrl — SDK reads from process.env');
-    assert.equal(config.modelId, 'sonnet');
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.ANTHROPIC_BASE_URL;
+    const dbSnapshot = {
+      anthropic_auth_token: getSetting('anthropic_auth_token'),
+      anthropic_base_url: getSetting('anthropic_base_url'),
+    };
+    setSetting('anthropic_auth_token', '');
+    setSetting('anthropic_base_url', '');
+    try {
+      // env mode: provider=undefined, hasCredentials=true
+      // toAiSdkConfig must produce a valid config that relies on process.env for auth
+      const resolved: ResolvedProvider = {
+        provider: undefined,
+        protocol: 'anthropic',
+        authStyle: 'api_key',
+        model: 'sonnet',
+        upstreamModel: 'sonnet',
+        modelDisplayName: undefined,
+        headers: {},
+        envOverrides: {},
+        roleModels: {},
+        hasCredentials: true,
+        availableModels: [],
+        settingSources: ['user', 'project', 'local'],
+      };
+      const config = toAiSdkConfig(resolved);
+      assert.equal(config.sdkType, 'anthropic');
+      assert.equal(config.apiKey, undefined, 'env mode should not inject apiKey — SDK reads from process.env');
+      assert.equal(config.baseUrl, undefined, 'env mode should not inject baseUrl — SDK reads from process.env');
+      assert.equal(config.modelId, 'sonnet');
+    } finally {
+      for (const [k, v] of Object.entries(envSnapshot)) {
+        if (v !== undefined) process.env[k] = v; else delete process.env[k];
+      }
+      setSetting('anthropic_auth_token', dbSnapshot.anthropic_auth_token || '');
+      setSetting('anthropic_base_url', dbSnapshot.anthropic_base_url || '');
+    }
   });
 
   it('upstream model mapping is consistent between AI SDK and Claude Code paths', () => {
@@ -877,33 +922,183 @@ describe('Entry Point Resolution Contract', () => {
         id: 'test', name: 'GLM', provider_type: 'custom', protocol: 'anthropic',
         base_url: 'https://open.bigmodel.cn/api/anthropic', api_key: 'key',
         is_active: 1, sort_order: 0, extra_env: '{}', headers_json: '{}',
-        env_overrides_json: '', role_models_json: '{"default":"glm-4.7"}',
+        env_overrides_json: '', role_models_json: '{"default":"glm-5-turbo"}',
         notes: '', created_at: '', updated_at: '', options_json: '{}',
       },
       protocol: 'anthropic',
       authStyle: 'api_key',
       model: 'sonnet',
-      upstreamModel: 'glm-4.7',
-      modelDisplayName: 'GLM-4.7',
+      upstreamModel: 'glm-5-turbo',
+      modelDisplayName: 'GLM-5-Turbo',
       headers: {},
       envOverrides: {},
-      roleModels: { default: 'glm-4.7' },
+      roleModels: { default: 'glm-5-turbo' },
       hasCredentials: true,
       availableModels: [
-        { modelId: 'sonnet', upstreamModelId: 'glm-4.7', displayName: 'GLM-4.7' },
+        { modelId: 'sonnet', upstreamModelId: 'glm-5-turbo', displayName: 'GLM-5-Turbo' },
       ],
       settingSources: ['project', 'local'],
     };
 
     // AI SDK path: toAiSdkConfig should use upstreamModel
     const aiConfig = toAiSdkConfig(resolved);
-    assert.equal(aiConfig.modelId, 'glm-4.7', 'AI SDK should use upstream model ID');
+    assert.equal(aiConfig.modelId, 'glm-5-turbo', 'AI SDK should use upstream model ID');
 
     // Claude Code path: toClaudeCodeEnv should set ANTHROPIC_MODEL from roleModels.default
     const ccEnv = toClaudeCodeEnv({}, resolved);
-    assert.equal(ccEnv.ANTHROPIC_MODEL, 'glm-4.7', 'Claude Code env should use upstream model ID');
+    assert.equal(ccEnv.ANTHROPIC_MODEL, 'glm-5-turbo', 'Claude Code env should use upstream model ID');
 
     // Both paths use the same upstream ID
     assert.equal(aiConfig.modelId, ccEnv.ANTHROPIC_MODEL, 'AI SDK and Claude Code must use same upstream model');
+  });
+});
+
+// ── Global Default Model Tests ──────────────────────────────────
+
+import { getSetting, setSetting } from '../../lib/db';
+
+describe('Global Default Model', () => {
+  // Save and restore settings around each test
+  let savedModel: string | null | undefined;
+  let savedProvider: string | null | undefined;
+
+  const setup = () => {
+    savedModel = getSetting('global_default_model');
+    savedProvider = getSetting('global_default_model_provider');
+  };
+  const teardown = () => {
+    setSetting('global_default_model', savedModel || '');
+    setSetting('global_default_model_provider', savedProvider || '');
+  };
+
+  // ── env provider branch ───────────────────────────────────────
+
+  it('env provider uses global default model when it belongs to env', () => {
+    setup();
+    try {
+      setSetting('global_default_model', 'opus');
+      setSetting('global_default_model_provider', 'env');
+
+      const resolved = resolveProvider({ providerId: 'env' });
+      assert.equal(resolved.model, 'opus', 'should use global default model for env provider');
+    } finally {
+      teardown();
+    }
+  });
+
+  it('env provider ignores global default model when it belongs to another provider', () => {
+    setup();
+    try {
+      setSetting('global_default_model', 'some-model');
+      setSetting('global_default_model_provider', 'some-other-provider-id');
+
+      const resolved = resolveProvider({ providerId: 'env' });
+      // Should NOT use 'some-model' because it belongs to a different provider
+      assert.notEqual(resolved.model, 'some-model',
+        'should not apply global default from another provider');
+    } finally {
+      teardown();
+    }
+  });
+
+  it('explicit model overrides global default', () => {
+    setup();
+    try {
+      setSetting('global_default_model', 'opus');
+      setSetting('global_default_model_provider', 'env');
+
+      const resolved = resolveProvider({ providerId: 'env', model: 'haiku' });
+      assert.equal(resolved.model, 'haiku', 'explicit model should take priority');
+    } finally {
+      teardown();
+    }
+  });
+
+  it('session model overrides global default', () => {
+    setup();
+    try {
+      setSetting('global_default_model', 'opus');
+      setSetting('global_default_model_provider', 'env');
+
+      const resolved = resolveProvider({ providerId: 'env', sessionModel: 'sonnet' });
+      assert.equal(resolved.model, 'sonnet', 'session model should take priority');
+    } finally {
+      teardown();
+    }
+  });
+
+  // ── DB provider branch ────────────────────────────────────────
+
+  it('DB provider uses global default model when it belongs to that provider', () => {
+    setup();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- dynamic import in test to avoid top-level side effects
+const { createProvider, deleteProvider } = require('../../lib/db');
+    const provider = createProvider({
+      name: '__test_global_default__',
+      provider_type: 'anthropic',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'test-key',
+    });
+    try {
+      setSetting('global_default_model', 'test-model-x');
+      setSetting('global_default_model_provider', provider.id);
+
+      const resolved = resolveProvider({ providerId: provider.id });
+      assert.equal(resolved.model, 'test-model-x',
+        'DB provider should use global default when provider ID matches');
+    } finally {
+      deleteProvider(provider.id);
+      teardown();
+    }
+  });
+
+  it('DB provider ignores global default model when it belongs to a different provider', () => {
+    setup();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- dynamic import in test to avoid top-level side effects
+const { createProvider, deleteProvider } = require('../../lib/db');
+    const provider = createProvider({
+      name: '__test_global_default_cross__',
+      provider_type: 'anthropic',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'test-key',
+      role_models_json: JSON.stringify({ default: 'own-default-model' }),
+    });
+    try {
+      setSetting('global_default_model', 'foreign-model');
+      setSetting('global_default_model_provider', 'some-completely-different-id');
+
+      const resolved = resolveProvider({ providerId: provider.id });
+      // Should fall through to roleModels.default, NOT use 'foreign-model'
+      assert.notEqual(resolved.model, 'foreign-model',
+        'DB provider should not use global default from another provider');
+      assert.equal(resolved.model, 'own-default-model',
+        'should fall through to roleModels.default');
+    } finally {
+      deleteProvider(provider.id);
+      teardown();
+    }
+  });
+
+  it('DB provider: session model overrides global default even when provider matches', () => {
+    setup();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- dynamic import in test to avoid top-level side effects
+const { createProvider, deleteProvider } = require('../../lib/db');
+    const provider = createProvider({
+      name: '__test_global_default_session__',
+      provider_type: 'anthropic',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'test-key',
+    });
+    try {
+      setSetting('global_default_model', 'global-pick');
+      setSetting('global_default_model_provider', provider.id);
+
+      const resolved = resolveProvider({ providerId: provider.id, sessionModel: 'session-pick' });
+      assert.equal(resolved.model, 'session-pick',
+        'session model should take priority over global default');
+    } finally {
+      deleteProvider(provider.id);
+      teardown();
+    }
   });
 });
